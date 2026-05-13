@@ -4,9 +4,11 @@ import { revalidatePath } from "next/cache";
 import { z } from "zod";
 import { generateAudit } from "@/lib/audit-engine";
 import { parseCsv, pick } from "@/lib/csv";
+import { processImportJobChunk } from "@/lib/import-jobs";
 import { prisma } from "@/lib/prisma";
 
 const leadStatuses = ["New", "Contacted", "Follow-up", "Won", "Lost"] as const;
+const MAX_SYNC_AUDIT_ROWS_PER_IMPORT = 50;
 
 const formSchema = z.object({
   businessName: z.string().min(1, "Business name is required."),
@@ -226,10 +228,41 @@ export async function importLeadsCsvAction(_prevState: unknown, formData: FormDa
   const fileCsv = file instanceof File && file.size > 0 ? await file.text() : "";
   const csvText = fileCsv || pastedCsv;
 
-  if (!csvText.trim()) return { ok: false, imported: 0, skipped: 0, failed: 0, error: "Paste or upload CSV data first." };
+  if (!csvText.trim()) return { ok: false, imported: 0, skipped: 0, failed: 0, queued: false, jobId: "", error: "Paste or upload CSV data first." };
 
   const rows = parseCsv(csvText);
-  if (!rows.length) return { ok: false, imported: 0, skipped: 0, failed: 0, error: "No valid CSV rows found." };
+  if (!rows.length) return { ok: false, imported: 0, skipped: 0, failed: 0, queued: false, jobId: "", error: "No valid CSV rows found." };
+
+  if (rows.length > MAX_SYNC_AUDIT_ROWS_PER_IMPORT) {
+    const job = await prisma.importJob.create({
+      data: {
+        status: "Queued",
+        mode: "full-audit",
+        totalRows: rows.length,
+        payloadJson: JSON.stringify(rows),
+      },
+    });
+    void (async () => {
+      const maxTicks = rows.length + 5;
+      for (let tick = 0; tick < maxTicks; tick += 1) {
+        const current = await processImportJobChunk(job.id);
+        if (!current) break;
+        if (current.status === "Completed" || current.status === "Failed") break;
+      }
+    })().catch(() => {
+      // Intentionally swallowed: failures are captured in ImportJob state during chunk processing.
+    });
+    revalidatePath("/");
+    return {
+      ok: true,
+      imported: 0,
+      skipped: 0,
+      failed: 0,
+      queued: true,
+      jobId: job.id,
+      error: `Queued ${rows.length} rows for background import. You can keep using the app while audits process.`,
+    };
+  }
 
   let imported = 0;
   let skipped = 0;
@@ -297,7 +330,8 @@ export async function importLeadsCsvAction(_prevState: unknown, formData: FormDa
   }
 
   revalidatePath("/");
-  return { ok: true, imported, skipped, failed, error: errors.slice(0, 3).join(" ") };
+  const error = errors.slice(0, 2).join(" ");
+  return { ok: true, imported, skipped, failed, queued: false, jobId: "", error };
 }
 
 export async function deleteLeadAction(id: string) {

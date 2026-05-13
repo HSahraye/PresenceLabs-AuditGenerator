@@ -22,6 +22,26 @@ const labels: Array<[keyof AuditChecks, string, string]> = [
   ["faq", "FAQ", "Answers common objections"],
 ];
 
+const deliverableMap: Partial<Record<keyof AuditChecks, { title: string; detail: string }>> = {
+  hasWebsite: { title: "Professional 5-page website", detail: "Home, Services, About, Reviews, and Contact pages — built to convert visitors into calls." },
+  mobileFriendly: { title: "Mobile-first redesign", detail: "Fast-loading, sharp on any phone — because 70%+ of local searches happen on mobile." },
+  clearCta: { title: "Clear call-to-action on every page", detail: "Book Now / Get a Free Quote / Call Today buttons strategically placed throughout." },
+  phoneEasyToFind: { title: "Click-to-call phone in header & footer", detail: "Phone number visible above the fold on every page so customers never hunt for it." },
+  reviewsVisible: { title: "Review showcase section", detail: "Your best Google reviews displayed prominently to build instant trust with new visitors." },
+  onlineBooking: { title: "Online booking or quote request form", detail: "Customers can request a quote or book directly — with email notifications to you." },
+  trustSection: { title: "Trust signals section", detail: "License info, years in business, guarantees, and industry badges — answers 'why you?' before they ask." },
+  gallery: { title: "Photo gallery (up to 20 images)", detail: "Project photos, before/afters, or portfolio images that prove the quality of your work." },
+  serviceList: { title: "Dedicated service pages", detail: "A clear services menu with a page for each offering you provide — helps Google and customers understand exactly what you do." },
+  pricing: { title: "Pricing or packages page", detail: "Transparent pricing or package tiers that help customers self-qualify and reduce back-and-forth." },
+  faq: { title: "FAQ section", detail: "Answers the top 5 questions and objections before they're asked — so fewer leads fall off." },
+};
+
+const alwaysDeliverables = [
+  { title: "Google Business Profile optimization", detail: "Updated photos, services, description, and category targeting for better local map rankings." },
+  { title: "Local SEO foundation", detail: "Title tags, meta descriptions, and schema markup so Google can correctly show your site to nearby searchers." },
+  { title: "30-day revision window", detail: "After launch, you get 30 days of included edits — no extra charge." },
+];
+
 function scoreCopy(score: number) {
   if (score >= 85) return { label: "High opportunity", className: "bg-rose-500 text-white", copy: "This business has clear conversion gaps that can likely be turned into more calls, quotes, and booked jobs." };
   if (score >= 70) return { label: "Strong opportunity", className: "bg-amber-400 text-slate-950", copy: "This business has several fixable online-presence gaps that may be limiting customer action." };
@@ -40,6 +60,13 @@ export default async function ClientAuditPage({ params }: { params: Promise<{ id
   const selectedPrice = estimatedDealValue(selectedPackage, lead.customPrice);
   const passed = labels.filter(([key]) => audit.checks[key]).length;
   const failed = labels.length - passed;
+  const deliverables = [
+    ...labels
+      .filter(([key]) => !audit.checks[key])
+      .map(([key]) => deliverableMap[key])
+      .filter((d): d is { title: string; detail: string } => Boolean(d)),
+    ...alwaysDeliverables,
+  ];
 
   return (
     <main className="min-h-screen bg-[#f5f7f2] text-slate-950">
@@ -137,6 +164,28 @@ export default async function ClientAuditPage({ params }: { params: Promise<{ id
           </div>
         </div>
       </section>
+
+      {/* Deliverables Section */}
+      {deliverables.length > 0 && (
+        <section className="px-5 pb-6 sm:px-8 lg:px-12">
+          <div className="mx-auto max-w-6xl rounded-[2rem] border border-slate-200 bg-white p-6 shadow-sm">
+            <p className="text-sm font-black uppercase tracking-[0.22em] text-lime-700">🛠️ What Presence Labs will build</p>
+            <h2 className="mt-3 text-3xl font-black">Your complete fix list</h2>
+            <p className="mt-3 max-w-3xl text-sm leading-6 text-slate-500">Based on this audit, here is exactly what Presence Labs will deliver — no guesswork, no vague scope.</p>
+            <div className="mt-5 grid gap-3 sm:grid-cols-2 lg:grid-cols-3">
+              {deliverables.map((item, i) => (
+                <div key={i} className="flex gap-3 rounded-2xl border border-slate-100 bg-slate-50 p-4">
+                  <CheckCircle2 className="mt-0.5 size-5 shrink-0 text-lime-600" />
+                  <div>
+                    <p className="text-sm font-black text-slate-950">{item.title}</p>
+                    <p className="mt-1 text-xs leading-5 text-slate-500">{item.detail}</p>
+                  </div>
+                </div>
+              ))}
+            </div>
+          </div>
+        </section>
+      )}
 
       <section className="px-5 pb-14 sm:px-8 lg:px-12">
         <div className="mx-auto mb-6 max-w-6xl rounded-[2rem] bg-lime-300 p-6 text-slate-950 shadow-sm">

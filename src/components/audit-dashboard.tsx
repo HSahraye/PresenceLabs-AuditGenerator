@@ -1,7 +1,8 @@
 "use client";
 
 import Link from "next/link";
-import { useActionState, useMemo, useRef, useState, useTransition } from "react";
+import { useRouter } from "next/navigation";
+import { useActionState, useEffect, useMemo, useRef, useState, useTransition } from "react";
 import { useFormStatus } from "react-dom";
 import { ArrowUpRight, BarChart3, CheckCircle2, Copy, ExternalLink, Filter, Loader2, Mail, Phone, Radar, Search, Share2, Sparkles, Trash2, XCircle } from "lucide-react";
 import { createCaseStudyAction } from "@/app/actions/case-studies";
@@ -54,11 +55,27 @@ type LeadView = LeadRow & {
 };
 
 const initialState = { ok: false as const, error: "" };
-const importInitialState = { ok: false as const, imported: 0, skipped: 0, failed: 0, error: "" };
+const importInitialState = { ok: false as const, imported: 0, skipped: 0, failed: 0, queued: false, jobId: "", error: "" };
 const offerInitialState = { ok: false as const, error: "", leadId: "" };
 const caseStudyInitialState = { ok: false as const, error: "" };
 const statuses: LeadStatus[] = ["New", "Contacted", "Follow-up", "Won", "Lost"];
 const standardPackages = ["Presence Labs Launch Package", "Presence Labs Conversion Upgrade", "Presence Labs Local Trust Tune-Up"];
+
+type ImportJobView = {
+  id: string;
+  status: string;
+  mode: string;
+  totalRows: number;
+  processedRows: number;
+  importedRows: number;
+  skippedRows: number;
+  failedRows: number;
+  errorSummary: string | null;
+  createdAt: string;
+  startedAt: string | null;
+  completedAt: string | null;
+  updatedAt: string;
+};
 
 function ImportButton() {
   const { pending } = useFormStatus();
@@ -143,7 +160,18 @@ function ScriptBox({ title, value, copyLabel }: { title: string; value: string; 
   );
 }
 
-export function AuditDashboard({ leads, caseStudies, todayActivity }: { leads: LeadRow[]; caseStudies: CaseStudyRow[]; todayActivity: { calls: number; sms: number; emails: number } }) {
+export function AuditDashboard({
+  leads,
+  caseStudies,
+  todayActivity,
+  latestImportJob,
+}: {
+  leads: LeadRow[];
+  caseStudies: CaseStudyRow[];
+  todayActivity: { calls: number; sms: number; emails: number };
+  latestImportJob: ImportJobView | null;
+}) {
+  const router = useRouter();
   const [state, formAction] = useActionState(createLeadAction, initialState);
   const [importState, importFormAction] = useActionState(importLeadsCsvAction, importInitialState);
   const [offerState, offerFormAction] = useActionState(updateLeadOfferAction, offerInitialState);
@@ -173,6 +201,11 @@ export function AuditDashboard({ leads, caseStudies, todayActivity }: { leads: L
   const [editingGoal, setEditingGoal] = useState(false);
   const [goalInput, setGoalInput] = useState("");
   const goalInputRef = useRef<HTMLInputElement>(null);
+  const [activeImportJob, setActiveImportJob] = useState<ImportJobView | null>(latestImportJob);
+  const isImportTickingRef = useRef(false);
+  const didRefreshCompletedImportRef = useRef(false);
+  const queuedImportJobId = importState.ok && importState.queued ? importState.jobId : "";
+  const trackedImportJobId = queuedImportJobId || activeImportJob?.id || "";
 
   const saveGoal = () => {
     const val = Math.max(0, parseInt(goalInput.replace(/[^0-9]/g, ""), 10) || 0);
@@ -180,6 +213,50 @@ export function AuditDashboard({ leads, caseStudies, todayActivity }: { leads: L
     localStorage.setItem("pl-monthly-goal", String(val));
     setEditingGoal(false);
   };
+
+  useEffect(() => {
+    if (!trackedImportJobId) return;
+    if (
+      activeImportJob?.id === trackedImportJobId &&
+      (activeImportJob.status === "Completed" || activeImportJob.status === "Failed")
+    ) {
+      return;
+    }
+    if (activeImportJob?.id !== trackedImportJobId) {
+      didRefreshCompletedImportRef.current = false;
+    }
+
+    let cancelled = false;
+    const tick = async () => {
+      if (cancelled || isImportTickingRef.current) return;
+      isImportTickingRef.current = true;
+      try {
+        const statusRes = await fetch(`/api/import-jobs/${trackedImportJobId}`, { cache: "no-store" });
+        if (!statusRes.ok) return;
+        const payload = (await statusRes.json()) as { ok?: boolean; job?: ImportJobView };
+        if (!cancelled && payload.job) setActiveImportJob(payload.job);
+      } finally {
+        isImportTickingRef.current = false;
+      }
+    };
+
+    void tick();
+    const interval = window.setInterval(() => {
+      void tick();
+    }, 2500);
+    return () => {
+      cancelled = true;
+      window.clearInterval(interval);
+    };
+  }, [activeImportJob?.id, activeImportJob?.status, trackedImportJobId]);
+
+  useEffect(() => {
+    if (!activeImportJob) return;
+    if (activeImportJob.status !== "Completed") return;
+    if (didRefreshCompletedImportRef.current) return;
+    didRefreshCompletedImportRef.current = true;
+    router.refresh();
+  }, [activeImportJob, router]);
 
   const parsedLeads = useMemo<LeadView[]>(
     () =>
@@ -562,7 +639,25 @@ export function AuditDashboard({ leads, caseStudies, todayActivity }: { leads: L
               </label>
               <ImportButton />
               {importState.ok ? <p className="rounded-xl bg-lime-50 p-3 text-xs font-black text-lime-800">Imported {importState.imported} • Skipped {importState.skipped} • Failed {importState.failed}</p> : null}
+              {importState.ok && importState.error ? <p className="rounded-xl bg-amber-50 p-3 text-xs font-black text-amber-800">{importState.error}</p> : null}
               {!importState.ok && importState.error ? <p className="rounded-xl bg-rose-50 p-3 text-xs font-black text-rose-700">{importState.error}</p> : null}
+              {activeImportJob ? (
+                <div className="rounded-xl border border-sky-200 bg-sky-50 p-3 text-xs font-black text-sky-900">
+                  <p>
+                    Background import: {activeImportJob.status} • {activeImportJob.processedRows}/{activeImportJob.totalRows || "?"} processed
+                  </p>
+                  <p className="mt-1 text-sky-700">
+                    Imported {activeImportJob.importedRows} • Skipped {activeImportJob.skippedRows} • Failed {activeImportJob.failedRows}
+                  </p>
+                  <div className="mt-2 h-2 overflow-hidden rounded-full bg-sky-100">
+                    <div
+                      className="h-full rounded-full bg-sky-500 transition-all"
+                      style={{ width: `${activeImportJob.totalRows > 0 ? Math.min(100, (activeImportJob.processedRows / activeImportJob.totalRows) * 100) : 0}%` }}
+                    />
+                  </div>
+                  {activeImportJob.errorSummary ? <p className="mt-2 text-[11px] font-bold text-rose-700">{activeImportJob.errorSummary}</p> : null}
+                </div>
+              ) : null}
             </form>
           </div>
 

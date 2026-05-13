@@ -92,3 +92,20 @@ model ResearchQueueItem {
   createdAt       DateTime @default(now())
   updatedAt       DateTime @updatedAt
 }
+
+model ImportJob {
+  id           String   @id @default(cuid())
+  status       String   @default("Queued")
+  mode         String   @default("full-audit")
+  totalRows    Int
+  processedRows Int     @default(0)
+  importedRows Int      @default(0)
+  skippedRows  Int      @default(0)
+  failedRows   Int      @default(0)
+  payloadJson  String
+  errorSummary String?
+  startedAt    DateTime?
+  completedAt  DateTime?
+  createdAt    DateTime @default(now())
+  updatedAt    DateTime @updatedAt
+}

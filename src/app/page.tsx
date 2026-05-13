@@ -33,9 +33,32 @@ export default async function Home() {
   });
   const paymentCountByLead = new Map(paymentCounts.map((item) => [item.leadId, item._count.leadId]));
   const caseStudies = await prisma.caseStudy.findMany({ orderBy: [{ updatedAt: "desc" }] });
+  const latestImportJob = await prisma.importJob.findFirst({
+    where: { status: { in: ["Queued", "Running"] } },
+    orderBy: { createdAt: "desc" },
+  });
 
   return (
     <AuditDashboard
+      latestImportJob={
+        latestImportJob
+          ? {
+              id: latestImportJob.id,
+              status: latestImportJob.status,
+              mode: latestImportJob.mode,
+              totalRows: latestImportJob.totalRows,
+              processedRows: latestImportJob.processedRows,
+              importedRows: latestImportJob.importedRows,
+              skippedRows: latestImportJob.skippedRows,
+              failedRows: latestImportJob.failedRows,
+              errorSummary: latestImportJob.errorSummary,
+              createdAt: latestImportJob.createdAt.toISOString(),
+              startedAt: latestImportJob.startedAt?.toISOString() ?? null,
+              completedAt: latestImportJob.completedAt?.toISOString() ?? null,
+              updatedAt: latestImportJob.updatedAt.toISOString(),
+            }
+          : null
+      }
       caseStudies={caseStudies.map((caseStudy) => ({
         id: caseStudy.id,
         title: caseStudy.title,
