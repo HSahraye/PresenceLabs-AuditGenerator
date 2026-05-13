@@ -1,0 +1,94 @@
+generator client {
+  provider = "prisma-client-js"
+}
+
+datasource db {
+  provider = "sqlite"
+  url      = env("DATABASE_URL")
+}
+
+model Lead {
+  id                 String   @id @default(cuid())
+  businessName       String
+  ownerName          String?
+  category           String?
+  location           String?
+  websiteUrl         String?
+  googleProfileUrl   String?
+  phone              String?
+  email              String?
+  notes              String?
+  status             String   @default("New")
+  score              Int
+  packageName        String
+  customPrice        Int?
+  stripePaymentUrl   String?
+  attachedCaseStudyId String?
+  attachedCaseStudy  CaseStudy? @relation(fields: [attachedCaseStudyId], references: [id], onDelete: SetNull)
+  painSummary        String
+  auditJson          String
+  assetsJson         String
+  createdAt          DateTime @default(now())
+  nextFollowUpAt     DateTime?
+  lastContactedAt    DateTime?
+  outreachLogs       OutreachLog[]
+  viewLogs           ViewLog[]
+  paymentLogs        PaymentLog[]
+  updatedAt          DateTime @updatedAt
+}
+
+model OutreachLog {
+  id        String   @id @default(cuid())
+  leadId    String
+  type      String
+  notes     String?
+  lead      Lead     @relation(fields: [leadId], references: [id], onDelete: Cascade)
+  createdAt DateTime @default(now())
+}
+
+model ViewLog {
+  id        String   @id @default(cuid())
+  leadId    String
+  ip        String?
+  userAgent String?
+  lead      Lead     @relation(fields: [leadId], references: [id], onDelete: Cascade)
+  createdAt DateTime @default(now())
+}
+
+model PaymentLog {
+  id        String   @id @default(cuid())
+  leadId    String
+  ip        String?
+  userAgent String?
+  lead      Lead     @relation(fields: [leadId], references: [id], onDelete: Cascade)
+  createdAt DateTime @default(now())
+}
+
+model CaseStudy {
+  id          String   @id @default(cuid())
+  title       String
+  result      String
+  description String
+  imageUrl    String?
+  category    String?
+  leads       Lead[]
+  createdAt   DateTime @default(now())
+  updatedAt   DateTime @updatedAt
+}
+
+model ResearchQueueItem {
+  id              String   @id @default(cuid())
+  businessName    String
+  websiteUrl      String?
+  location        String?
+  category        String?
+  phone           String?
+  email           String?
+  notes           String?
+  source          String?
+  priority        Int      @default(3)
+  status          String   @default("Queued")
+  convertedLeadId String?
+  createdAt       DateTime @default(now())
+  updatedAt       DateTime @updatedAt
+}
