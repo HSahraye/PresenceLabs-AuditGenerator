@@ -1,9 +1,11 @@
 import { ResearchQueueDashboard } from "@/components/research-queue-dashboard";
+import { requireRole } from "@/lib/auth";
 import { prisma } from "@/lib/prisma";
 
 export const dynamic = "force-dynamic";
 
 export default async function ResearchPage() {
+  await requireRole(["admin", "sales", "viewer"]);
   const items = await prisma.researchQueueItem.findMany({
     orderBy: [{ priority: "asc" }, { updatedAt: "desc" }],
   });

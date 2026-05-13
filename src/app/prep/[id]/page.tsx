@@ -6,6 +6,8 @@ import { estimatedDealValue, formatMoney } from "@/lib/money";
 import type { AuditChecks, GeneratedAssets } from "@/lib/types";
 import { MeetingPrepCopyButtons } from "@/components/meeting-prep-copy-buttons";
 import { generateObjectionResponses } from "@/lib/objections";
+import { requireRole } from "@/lib/auth";
+import { buildSignedAuditPath } from "@/lib/audit-links";
 
 export const dynamic = "force-dynamic";
 
@@ -24,6 +26,7 @@ const auditLabels: Array<[keyof AuditChecks, string]> = [
 ];
 
 export default async function MeetingPrepPage({ params }: { params: Promise<{ id: string }> }) {
+  await requireRole(["admin", "sales", "viewer"]);
   const { id } = await params;
   const lead = await prisma.lead.findUnique({ where: { id }, include: { attachedCaseStudy: true } });
   if (!lead) notFound();
@@ -33,6 +36,7 @@ export default async function MeetingPrepPage({ params }: { params: Promise<{ id
   const price = estimatedDealValue(lead.packageName, lead.customPrice);
   const failedChecks = auditLabels.filter(([key]) => !audit.checks[key]);
   const objections = generateObjectionResponses(lead.businessName, assets, lead.packageName);
+  const auditPath = buildSignedAuditPath(lead.id);
 
   const confirmationEmail = `Subject: Quick follow-up — ${lead.businessName} presence audit
 
@@ -232,7 +236,7 @@ Presence Labs`;
             <p className="font-black">Shareable Audit Report</p>
             <p className="text-xs text-slate-500 mt-0.5">Send this link to the prospect after the call</p>
           </div>
-          <a href={`/audit/${lead.id}`} target="_blank" className="inline-flex h-10 items-center gap-2 rounded-2xl bg-slate-950 px-4 text-xs font-black text-white transition hover:bg-slate-800 shrink-0">
+          <a href={auditPath} target="_blank" className="inline-flex h-10 items-center gap-2 rounded-2xl bg-slate-950 px-4 text-xs font-black text-white transition hover:bg-slate-800 shrink-0">
             Open Audit <ExternalLink className="size-3.5" />
           </a>
         </div>

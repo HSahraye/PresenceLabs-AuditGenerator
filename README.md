@@ -1,6 +1,8 @@
 # Presence Labs Audit Generator
 
-Local-first MVP for auditing small local businesses and generating Presence Labs sales offers.
+Lead intake + audit generation platform for Presence Labs. This app supports internal sales workflows,
+public audit sharing via signed links, async import jobs, and public lead ingestion for
+`presencelabs.net` integration.
 
 ## Setup
 
@@ -11,32 +13,55 @@ npm run db:push
 npm run dev
 ```
 
-Optional Claude generation (preferred):
+## Environment
 
-```bash
-# Add your key to .env; do not commit it
-ANTHROPIC_API_KEY="your_key_here"
-```
+Review `.env.example` and configure:
 
-Optional Gemini fallback:
+- `DATABASE_URL` for local or hosted DB.
+- `APP_AUTH_ENABLED`, role passwords, and `SESSION_SECRET`.
+- `AUDIT_LINK_SECRET` for signed public audit URLs.
+- `PUBLIC_INGEST_API_KEY` + `PUBLIC_INGEST_API_SECRET` for presencelabs.net lead ingestion.
+- Stripe values for webhook processing (`STRIPE_SECRET_KEY`, `STRIPE_WEBHOOK_SECRET`).
 
-```bash
-GEMINI_API_KEY="your_key_here"
-```
-
-If both API keys are empty, the app uses a deterministic local fallback generator.
+If model API keys are empty, the app uses deterministic local fallback generation.
 
 ## Commands
 
 - `npm run dev` — local app
 - `npm run build` — production build validation
 - `npm run lint` — lint validation
+- `npm run test` — run automated tests
 - `npm run db:push` — create/update local SQLite DB
+- `npm run db:migrate:deploy` — run production migrations
+- `npm run db:generate` — regenerate Prisma client
 - `npm run db:studio` — inspect leads
 
-## Safety
+## Deploy (Netlify)
 
-- Local SQLite only by default.
-- No GitHub push.
-- No deployment configured.
-- Secrets stay in `.env`.
+1. Connect this repo to Netlify.
+2. Ensure `netlify.toml` is detected.
+3. Set required environment variables in Netlify dashboard.
+4. Run database migration in CI/CD using `npm run db:migrate:deploy`.
+5. Deploy to `app.presencelabs.net`.
+
+## Public Integration (presencelabs.net)
+
+- Public lead ingest endpoint: `POST /api/public/leads`
+- Public status endpoint: `GET /api/public/audits/:jobId/status`
+- Requests must include:
+  - `x-presencelabs-key`
+  - `x-presencelabs-ts`
+  - `x-presencelabs-signature` (HMAC SHA-256 over `${timestamp}.${rawBody}`)
+
+## Security Notes
+
+- Internal routes are session-protected when `APP_AUTH_ENABLED=true`.
+- Public audit pages require signed tokens when auth is enabled.
+- Website fetch logic blocks internal/private network targets.
+- Public endpoints are rate-limited.
+
+## Operations
+
+- Monitor import jobs in the dashboard (retry/cancel supported).
+- Stripe webhook endpoint: `POST /api/stripe/webhook` with idempotency protections.
+- Critical actions and domain events are stored in DB (`AuditLog`, `EventLog`, `WebhookEvent`).

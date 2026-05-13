@@ -3,7 +3,7 @@ generator client {
 }
 
 datasource db {
-  provider = "sqlite"
+  provider = "postgresql"
   url      = env("DATABASE_URL")
 }
 
@@ -34,6 +34,10 @@ model Lead {
   outreachLogs       OutreachLog[]
   viewLogs           ViewLog[]
   paymentLogs        PaymentLog[]
+  auditLogs          AuditLog[]
+  eventLogs          EventLog[]
+  paymentStatus      String   @default("none")
+  lastPaymentAt      DateTime?
   updatedAt          DateTime @updatedAt
 }
 
@@ -58,6 +62,9 @@ model ViewLog {
 model PaymentLog {
   id        String   @id @default(cuid())
   leadId    String
+  eventType String   @default("clicked")
+  provider  String   @default("manual-link")
+  externalId String?
   ip        String?
   userAgent String?
   lead      Lead     @relation(fields: [leadId], references: [id], onDelete: Cascade)
@@ -102,10 +109,44 @@ model ImportJob {
   importedRows Int      @default(0)
   skippedRows  Int      @default(0)
   failedRows   Int      @default(0)
+  attempts     Int      @default(0)
+  maxAttempts  Int      @default(3)
   payloadJson  String
   errorSummary String?
+  nextRunAt    DateTime?
+  cancelledAt  DateTime?
+  lastErrorAt  DateTime?
   startedAt    DateTime?
   completedAt  DateTime?
   createdAt    DateTime @default(now())
   updatedAt    DateTime @updatedAt
+}
+
+model AuditLog {
+  id           String   @id @default(cuid())
+  leadId        String?
+  action       String
+  actorRole    String
+  metadataJson String
+  lead         Lead?    @relation(fields: [leadId], references: [id], onDelete: SetNull)
+  createdAt    DateTime @default(now())
+}
+
+model EventLog {
+  id          String   @id @default(cuid())
+  leadId      String?
+  eventType   String
+  payloadJson String
+  lead        Lead?    @relation(fields: [leadId], references: [id], onDelete: SetNull)
+  createdAt   DateTime @default(now())
+}
+
+model WebhookEvent {
+  id         String   @id @default(cuid())
+  provider   String
+  eventId    String
+  payloadJson String
+  processedAt DateTime @default(now())
+
+  @@unique([provider, eventId])
 }

@@ -3,6 +3,8 @@
 import { revalidatePath } from "next/cache";
 import { z } from "zod";
 import { prisma } from "@/lib/prisma";
+import { requireRole } from "@/lib/auth";
+import { writeAuditLog } from "@/lib/audit-log";
 
 const caseStudySchema = z.object({
   title: z.string().min(1).max(160),
@@ -13,6 +15,7 @@ const caseStudySchema = z.object({
 });
 
 export async function createCaseStudyAction(_prevState: unknown, formData: FormData) {
+  const actorRole = await requireRole(["admin", "sales"]);
   const parsed = caseStudySchema.safeParse({
     title: formData.get("title"),
     result: formData.get("result"),
@@ -33,5 +36,6 @@ export async function createCaseStudyAction(_prevState: unknown, formData: FormD
   });
 
   revalidatePath("/");
+  await writeAuditLog({ action: "case-study.create", actorRole, metadata: { title: parsed.data.title } });
   return { ok: true, error: "" };
 }

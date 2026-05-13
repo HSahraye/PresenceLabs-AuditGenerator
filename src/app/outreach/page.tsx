@@ -1,9 +1,12 @@
 import { OutreachView } from "@/components/outreach-view";
+import { requireRole } from "@/lib/auth";
+import { buildSignedAuditPath } from "@/lib/audit-links";
 import { prisma } from "@/lib/prisma";
 
 export const dynamic = "force-dynamic";
 
 export default async function OutreachPage() {
+  await requireRole(["admin", "sales", "viewer"]);
   const now = new Date();
   const leads = await prisma.lead.findMany({
     where: {
@@ -39,6 +42,7 @@ export default async function OutreachPage() {
       email: lead.email,
       status: lead.status,
       score: lead.score,
+      publicAuditPath: buildSignedAuditPath(lead.id),
       painSummary: lead.painSummary,
       assetsJson: lead.assetsJson,
       nextFollowUpAt: lead.nextFollowUpAt?.toISOString() ?? null,

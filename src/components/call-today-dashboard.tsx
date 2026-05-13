@@ -18,6 +18,7 @@ type LeadRow = {
   notes: string | null;
   status: string;
   score: number;
+  publicAuditPath: string;
   packageName: string;
   customPrice: number | null;
   painSummary: string;
@@ -199,7 +200,7 @@ export function CallTodayDashboard({ leads }: { leads: LeadRow[] }) {
                       </a>
                     )}
                     <Link
-                      href={`/audit/${lead.id}`}
+                      href={lead.publicAuditPath}
                       target="_blank"
                       className="inline-flex h-11 items-center gap-2 rounded-2xl border border-slate-200 px-4 text-xs font-black text-slate-700 transition hover:bg-slate-50"
                     >

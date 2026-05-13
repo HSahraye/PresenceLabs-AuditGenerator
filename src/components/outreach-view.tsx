@@ -17,6 +17,7 @@ type OutreachLead = {
   email: string | null;
   status: string;
   score: number;
+  publicAuditPath: string;
   painSummary: string;
   assetsJson: string;
   nextFollowUpAt: string | null;
@@ -42,7 +43,7 @@ export function OutreachView({ leads }: { leads: OutreachLead[] }) {
   const [doneCount, setDoneCount] = useState(0);
   const [isPending, startTransition] = useTransition();
   const lead = parsedLeads[index];
-  const auditUrl = lead ? `${typeof window !== "undefined" ? window.location.origin : ""}/audit/${lead.id}` : "";
+  const auditUrl = lead ? `${typeof window !== "undefined" ? window.location.origin : ""}${lead.publicAuditPath}` : "";
   const smsUrl = lead?.phone ? `sms:${lead.phone}?&body=${encodeURIComponent(`${lead.assets.textMessageScript}\n\nAudit: ${auditUrl}`)}` : "";
   const emailUrl = lead ? `mailto:${lead.email ?? ""}?subject=${encodeURIComponent(`Quick online presence audit for ${lead.businessName}`)}&body=${encodeURIComponent(`${lead.assets.emailScript}\n\nAudit: ${auditUrl}`)}` : "";
 

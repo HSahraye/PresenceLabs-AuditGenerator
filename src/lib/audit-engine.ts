@@ -1,6 +1,7 @@
 import { GoogleGenAI } from "@google/genai";
 import { z } from "zod";
 import type { AuditChecks, AuditInput, AuditResult, GeneratedAssets } from "./types";
+import { validateExternalUrl } from "./network-safety";
 
 const inputSchema = z.object({
   businessName: z.string().min(1).max(140),
@@ -45,11 +46,17 @@ async function fetchWebsiteSignals(url?: string) {
   let html = "";
 
   if (!normalized) return { html, signals: ["No website URL provided."], warnings };
+  const validation = await validateExternalUrl(normalized);
+  if (!validation.ok) {
+    warnings.push(`Website fetch skipped: ${validation.reason}`);
+    signals.push("Website could not be inspected automatically.");
+    return { html, signals, warnings };
+  }
 
   try {
     const controller = new AbortController();
     const timeout = setTimeout(() => controller.abort(), 8000);
-    const response = await fetch(normalized, {
+    const response = await fetch(validation.url, {
       signal: controller.signal,
       headers: { "user-agent": "PresenceLabsAuditBot/1.0" },
     });

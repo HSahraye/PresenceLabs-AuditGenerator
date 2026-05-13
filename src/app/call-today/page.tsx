@@ -1,9 +1,12 @@
 import { prisma } from "@/lib/prisma";
 import { CallTodayDashboard } from "@/components/call-today-dashboard";
+import { requireRole } from "@/lib/auth";
+import { buildSignedAuditPath } from "@/lib/audit-links";
 
 export const dynamic = "force-dynamic";
 
 export default async function CallTodayPage() {
+  await requireRole(["admin", "sales", "viewer"]);
   const now = new Date();
   // End of today (23:59:59) so we include everything due today
   const endOfToday = new Date(now.getFullYear(), now.getMonth(), now.getDate(), 23, 59, 59);
@@ -54,6 +57,7 @@ export default async function CallTodayPage() {
 
   const serialized = leads.map((l) => ({
     ...l,
+    publicAuditPath: buildSignedAuditPath(l.id),
     nextFollowUpAt: l.nextFollowUpAt ? l.nextFollowUpAt.toISOString() : null,
     lastContactedAt: l.lastContactedAt ? l.lastContactedAt.toISOString() : null,
   }));

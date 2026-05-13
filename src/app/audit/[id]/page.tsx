@@ -7,6 +7,8 @@ import { prisma } from "@/lib/prisma";
 import { estimatedDealValue, formatMoney } from "@/lib/money";
 import { formatRelativeTime } from "@/lib/utils";
 import type { AuditChecks, GeneratedAssets } from "@/lib/types";
+import { verifyAuditAccessToken } from "@/lib/audit-links";
+import { isAuthEnabled } from "@/lib/env";
 
 const labels: Array<[keyof AuditChecks, string, string]> = [
   ["hasWebsite", "Website presence", "A real website customers can trust"],
@@ -48,8 +50,19 @@ function scoreCopy(score: number) {
   return { label: "Moderate opportunity", className: "bg-lime-300 text-slate-950", copy: "This business has a foundation to build on, with targeted improvements available." };
 }
 
-export default async function ClientAuditPage({ params }: { params: Promise<{ id: string }> }) {
+export default async function ClientAuditPage({
+  params,
+  searchParams,
+}: {
+  params: Promise<{ id: string }>;
+  searchParams: Promise<{ token?: string }>;
+}) {
   const { id } = await params;
+  const query = await searchParams;
+  const token = query.token ? String(query.token) : "";
+  if (isAuthEnabled() && !verifyAuditAccessToken(token, id)) {
+    notFound();
+  }
   const lead = await prisma.lead.findUnique({ where: { id }, include: { attachedCaseStudy: true } });
   if (!lead) notFound();
 

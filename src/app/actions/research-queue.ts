@@ -5,6 +5,9 @@ import { z } from "zod";
 import { generateAudit } from "@/lib/audit-engine";
 import { parseCsv, pick } from "@/lib/csv";
 import { prisma } from "@/lib/prisma";
+import { requireRole } from "@/lib/auth";
+import { writeAuditLog } from "@/lib/audit-log";
+import { trackEvent } from "@/lib/events";
 
 const queueStatuses = ["Queued", "Researching", "Audited", "Converted", "Skipped"] as const;
 
@@ -49,6 +52,7 @@ function normalizeWebsite(value?: string | null) {
 }
 
 export async function addResearchQueueItemsAction(_prevState: unknown, formData: FormData) {
+  const actorRole = await requireRole(["admin", "sales"]);
   const rawText = String(formData.get("items") ?? "");
   const source = String(formData.get("source") ?? "manual paste");
   const priority = Number(formData.get("priority") ?? 3);
@@ -108,18 +112,22 @@ export async function addResearchQueueItemsAction(_prevState: unknown, formData:
   }
 
   revalidatePath("/research");
+  await writeAuditLog({ action: "research.queue.add", actorRole, metadata: { added, skipped } });
   return { ok: true, added, skipped, error: "" };
 }
 
 export async function updateResearchQueueStatusAction(id: string, status: string) {
+  const actorRole = await requireRole(["admin", "sales"]);
   const parsed = queueStatusSchema.safeParse({ id, status });
   if (!parsed.success) return { ok: false, error: "Invalid queue status." };
   await prisma.researchQueueItem.update({ where: { id: parsed.data.id }, data: { status: parsed.data.status } });
   revalidatePath("/research");
+  await writeAuditLog({ action: "research.queue.status", actorRole, leadId: parsed.data.id, metadata: { status: parsed.data.status } });
   return { ok: true };
 }
 
 export async function convertQueueItemToLeadAction(id: string) {
+  const actorRole = await requireRole(["admin", "sales"]);
   const parsed = z.string().min(1).safeParse(id);
   if (!parsed.success) return { ok: false, error: "Invalid queue item." };
 
@@ -170,5 +178,7 @@ export async function convertQueueItemToLeadAction(id: string) {
   await prisma.researchQueueItem.update({ where: { id: item.id }, data: { status: "Converted", convertedLeadId: lead.id } });
   revalidatePath("/");
   revalidatePath("/research");
+  await trackEvent("lead_created", { leadId: lead.id, source: "research-queue" }, lead.id);
+  await writeAuditLog({ action: "research.queue.convert", actorRole, leadId: lead.id, metadata: { queueItemId: item.id } });
   return { ok: true, leadId: lead.id, reused: false };
 }

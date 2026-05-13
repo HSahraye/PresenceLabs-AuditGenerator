@@ -2,6 +2,7 @@ import Link from "next/link";
 import { ArrowRight, Phone, Ghost, Eye, Clock, Target, TrendingUp } from "lucide-react";
 import { prisma } from "@/lib/prisma";
 import { estimatedDealValue, formatMoney, weightedDealValue } from "@/lib/money";
+import { requireRole } from "@/lib/auth";
 
 export const dynamic = "force-dynamic";
 
@@ -13,6 +14,7 @@ function greeting() {
 }
 
 export default async function BriefPage() {
+  await requireRole(["admin", "sales", "viewer"]);
   const now = new Date();
   const endOfToday = new Date(now.getFullYear(), now.getMonth(), now.getDate(), 23, 59, 59);
   const threeDaysAgo = new Date(now.getTime() - 3 * 24 * 60 * 60 * 1000);

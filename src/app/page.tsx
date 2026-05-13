@@ -1,11 +1,16 @@
 import { AuditDashboard } from "@/components/audit-dashboard";
+import { requireRole } from "@/lib/auth";
+import { buildSignedAuditPath } from "@/lib/audit-links";
 import { prisma } from "@/lib/prisma";
 
 export const dynamic = "force-dynamic";
 
 export default async function Home() {
+  await requireRole(["admin", "sales", "viewer"]);
   const startOfToday = new Date();
   startOfToday.setHours(0, 0, 0, 0);
+  const last24Hours = new Date();
+  last24Hours.setHours(last24Hours.getHours() - 24);
 
   const leads = await prisma.lead.findMany({
     orderBy: [{ score: "desc" }, { createdAt: "desc" }],
@@ -37,6 +42,15 @@ export default async function Home() {
     where: { status: { in: ["Queued", "Running"] } },
     orderBy: { createdAt: "desc" },
   });
+  const recentImportJobs = await prisma.importJob.findMany({
+    orderBy: { createdAt: "desc" },
+    take: 8,
+  });
+  const [queueDepth, failedJobsCount, eventsLast24h] = await Promise.all([
+    prisma.importJob.count({ where: { status: { in: ["Queued", "Running"] } } }),
+    prisma.importJob.count({ where: { status: "Failed" } }),
+    prisma.eventLog.count({ where: { createdAt: { gte: last24Hours } } }),
+  ]);
 
   return (
     <AuditDashboard
@@ -59,6 +73,26 @@ export default async function Home() {
             }
           : null
       }
+      importJobs={recentImportJobs.map((job) => ({
+        id: job.id,
+        status: job.status,
+        mode: job.mode,
+        totalRows: job.totalRows,
+        processedRows: job.processedRows,
+        importedRows: job.importedRows,
+        skippedRows: job.skippedRows,
+        failedRows: job.failedRows,
+        errorSummary: job.errorSummary,
+        createdAt: job.createdAt.toISOString(),
+        startedAt: job.startedAt?.toISOString() ?? null,
+        completedAt: job.completedAt?.toISOString() ?? null,
+        updatedAt: job.updatedAt.toISOString(),
+      }))}
+      opsMetrics={{
+        queueDepth,
+        failedJobsCount,
+        eventsLast24h,
+      }}
       caseStudies={caseStudies.map((caseStudy) => ({
         id: caseStudy.id,
         title: caseStudy.title,
@@ -85,6 +119,7 @@ export default async function Home() {
         notes: lead.notes,
         status: lead.status,
         score: lead.score,
+        publicAuditPath: buildSignedAuditPath(lead.id),
         packageName: lead.packageName,
         customPrice: lead.customPrice,
         stripePaymentUrl: lead.stripePaymentUrl,
@@ -100,6 +135,8 @@ export default async function Home() {
         lastViewedAt: lead.viewLogs[0]?.createdAt.toISOString() ?? null,
         paymentClickCount: paymentCountByLead.get(lead.id) ?? 0,
         lastPaymentClickedAt: lead.paymentLogs[0]?.createdAt.toISOString() ?? null,
+        paymentStatus: lead.paymentStatus,
+        lastPaymentAt: lead.lastPaymentAt?.toISOString() ?? null,
         createdAt: lead.createdAt.toISOString(),
         updatedAt: lead.updatedAt.toISOString(),
       }))}

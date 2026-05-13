@@ -1,8 +1,11 @@
 import { prisma } from "@/lib/prisma";
 import { pick } from "@/lib/csv";
 import { generateAudit } from "@/lib/audit-engine";
+import { logger } from "./logger";
+import { trackEvent } from "./events";
 
 const DEFAULT_CHUNK_SIZE = 3;
+const RETRYABLE_IMPORT_ERRORS = [/429/, /rate limit/i, /timeout/i, /network/i, /5\d\d/];
 
 function normalizeWebsiteKey(value?: string) {
   if (!value) return "";
@@ -80,7 +83,7 @@ async function processRow(row: CsvRow, index: number) {
     return { kind: "skipped" as const };
   }
 
-  const audit = await generateAudit({
+  const audit = await generateAuditWithRetry({
     businessName: businessName || websiteUrl,
     ownerName,
     category,
@@ -111,6 +114,30 @@ async function processRow(row: CsvRow, index: number) {
   return { kind: "imported" as const };
 }
 
+async function generateAuditWithRetry(input: {
+  businessName: string;
+  ownerName?: string;
+  category?: string;
+  location?: string;
+  websiteUrl?: string;
+  notes?: string;
+}) {
+  let lastError: unknown;
+  for (let attempt = 0; attempt < 3; attempt += 1) {
+    try {
+      return await generateAudit(input);
+    } catch (error) {
+      lastError = error;
+      const message = error instanceof Error ? error.message : "unknown";
+      const retryable = RETRYABLE_IMPORT_ERRORS.some((pattern) => pattern.test(message));
+      if (!retryable || attempt === 2) break;
+      const delayMs = 300 * 2 ** attempt;
+      await new Promise((resolve) => setTimeout(resolve, delayMs));
+    }
+  }
+  throw lastError;
+}
+
 function parsePayload(payloadJson: string) {
   const parsed = JSON.parse(payloadJson) as unknown;
   if (!Array.isArray(parsed)) return [];
@@ -121,6 +148,13 @@ export async function processImportJobChunk(jobId: string, chunkSize = DEFAULT_C
   const job = await prisma.importJob.findUnique({ where: { id: jobId } });
   if (!job) return null;
   if (job.status === "Completed" || job.status === "Failed") return job;
+  if (job.cancelledAt) {
+    return prisma.importJob.update({
+      where: { id: job.id },
+      data: { status: "Cancelled", completedAt: new Date() },
+    });
+  }
+  if (job.nextRunAt && job.nextRunAt.getTime() > Date.now()) return job;
 
   const rows = parsePayload(job.payloadJson);
   const start = Math.max(0, job.processedRows);
@@ -135,6 +169,7 @@ export async function processImportJobChunk(jobId: string, chunkSize = DEFAULT_C
     where: { id: job.id },
     data: {
       status: "Running",
+      attempts: { increment: 1 },
       startedAt: job.startedAt ?? new Date(),
     },
   });
@@ -156,7 +191,7 @@ export async function processImportJobChunk(jobId: string, chunkSize = DEFAULT_C
 
   const processedRows = end;
   const isDone = processedRows >= rows.length;
-  return prisma.importJob.update({
+  const updated = await prisma.importJob.update({
     where: { id: job.id },
     data: {
       status: isDone ? "Completed" : "Running",
@@ -166,6 +201,54 @@ export async function processImportJobChunk(jobId: string, chunkSize = DEFAULT_C
       failedRows,
       errorSummary: errors.filter(Boolean).slice(0, 3).join(" "),
       completedAt: isDone ? new Date() : null,
+      nextRunAt: isDone ? null : new Date(Date.now() + 350),
+      lastErrorAt: errors.length ? new Date() : null,
     },
+  });
+  if (updated.status === "Completed") {
+    await trackEvent("import_job_completed", {
+      jobId: updated.id,
+      totalRows: updated.totalRows,
+      importedRows: updated.importedRows,
+      skippedRows: updated.skippedRows,
+      failedRows: updated.failedRows,
+    });
+  }
+  return updated;
+}
+
+export async function cancelImportJob(jobId: string) {
+  return prisma.importJob.update({
+    where: { id: jobId },
+    data: {
+      cancelledAt: new Date(),
+      status: "Cancelled",
+      completedAt: new Date(),
+    },
+  });
+}
+
+export async function retryImportJob(jobId: string) {
+  const job = await prisma.importJob.findUnique({ where: { id: jobId } });
+  if (!job) return null;
+  if (job.attempts >= job.maxAttempts) {
+    logger.warn("import_job_retry_limit_reached", { jobId, attempts: job.attempts, maxAttempts: job.maxAttempts });
+    return job;
+  }
+  return prisma.importJob.update({
+    where: { id: jobId },
+    data: {
+      status: "Queued",
+      nextRunAt: new Date(),
+      cancelledAt: null,
+      completedAt: null,
+    },
+  });
+}
+
+export async function listRecentImportJobs(limit = 10) {
+  return prisma.importJob.findMany({
+    orderBy: { createdAt: "desc" },
+    take: Math.max(1, Math.min(limit, 50)),
   });
 }

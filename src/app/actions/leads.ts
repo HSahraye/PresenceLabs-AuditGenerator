@@ -6,6 +6,10 @@ import { generateAudit } from "@/lib/audit-engine";
 import { parseCsv, pick } from "@/lib/csv";
 import { processImportJobChunk } from "@/lib/import-jobs";
 import { prisma } from "@/lib/prisma";
+import { requireRole } from "@/lib/auth";
+import { writeAuditLog } from "@/lib/audit-log";
+import { trackEvent } from "@/lib/events";
+import { sendCrmWebhook } from "@/lib/crm";
 
 const leadStatuses = ["New", "Contacted", "Follow-up", "Won", "Lost"] as const;
 const MAX_SYNC_AUDIT_ROWS_PER_IMPORT = 50;
@@ -58,6 +62,7 @@ function normalizeWebsiteKey(value?: string) {
 }
 
 export async function createLeadAction(_prevState: unknown, formData: FormData) {
+  const actorRole = await requireRole(["admin", "sales"]);
   const parsed = formSchema.safeParse({
     businessName: formData.get("businessName"),
     ownerName: formData.get("ownerName"),
@@ -97,10 +102,14 @@ export async function createLeadAction(_prevState: unknown, formData: FormData) 
   });
 
   revalidatePath("/");
+  await writeAuditLog({ action: "lead.create", actorRole, leadId: lead.id, metadata: { source: "manual" } });
+  await trackEvent("lead_created", { leadId: lead.id, source: "manual" }, lead.id);
+  await sendCrmWebhook("lead_created", { leadId: lead.id, businessName: lead.businessName });
   return { ok: true, leadId: lead.id };
 }
 
 export async function updateLeadStatusAction(id: string, status: string) {
+  const actorRole = await requireRole(["admin", "sales"]);
   const parsed = statusSchema.safeParse({ id, status });
   if (!parsed.success) return { ok: false, error: "Invalid lead status update." };
 
@@ -111,10 +120,12 @@ export async function updateLeadStatusAction(id: string, status: string) {
 
   revalidatePath("/");
   revalidatePath(`/audit/${parsed.data.id}`);
+  await writeAuditLog({ action: "lead.status.update", actorRole, leadId: parsed.data.id, metadata: { status: parsed.data.status } });
   return { ok: true };
 }
 
 export async function updateLeadOfferAction(_prevState: unknown, formData: FormData) {
+  const actorRole = await requireRole(["admin", "sales"]);
   const parsed = offerSchema.safeParse({
     id: formData.get("id"),
     packageName: formData.get("packageName"),
@@ -136,10 +147,17 @@ export async function updateLeadOfferAction(_prevState: unknown, formData: FormD
 
   revalidatePath("/");
   revalidatePath(`/audit/${parsed.data.id}`);
+  await writeAuditLog({
+    action: "lead.offer.update",
+    actorRole,
+    leadId: parsed.data.id,
+    metadata: { packageName: parsed.data.packageName, customPrice: parsed.data.customPrice ?? null },
+  });
   return { ok: true, leadId: parsed.data.id };
 }
 
 export async function updateLeadNotesAction(formData: FormData) {
+  const actorRole = await requireRole(["admin", "sales", "viewer"]);
   const parsed = notesSchema.safeParse({
     id: formData.get("id"),
     notes: formData.get("notes"),
@@ -153,10 +171,12 @@ export async function updateLeadNotesAction(formData: FormData) {
 
   revalidatePath("/");
   revalidatePath(`/audit/${parsed.data.id}`);
+  await writeAuditLog({ action: "lead.notes.update", actorRole, leadId: parsed.data.id });
   return { ok: true, leadId: parsed.data.id };
 }
 
 export async function logOutreachAction(id: string, type: "Email" | "Call" | "SMS" | "Share" | "Note", notes?: string, nextFollowUpAt?: string) {
+  const actorRole = await requireRole(["admin", "sales"]);
   const parsed = outreachSchema.safeParse({ id, type, notes, nextFollowUpAt });
   if (!parsed.success) return { ok: false, error: "Invalid outreach log." };
 
@@ -181,10 +201,13 @@ export async function logOutreachAction(id: string, type: "Email" | "Call" | "SM
 
   revalidatePath("/");
   revalidatePath("/call-today");
+  await trackEvent("lead_outreach_logged", { leadId: id, type }, id);
+  await writeAuditLog({ action: "lead.outreach.log", actorRole, leadId: id, metadata: { type } });
   return { ok: true };
 }
 
 export async function regenerateLeadAction(id: string, notes?: string) {
+  const actorRole = await requireRole(["admin", "sales"]);
   const parsed = z.string().min(1).safeParse(id);
   if (!parsed.success) return { ok: false, error: "Invalid lead id." };
 
@@ -219,10 +242,13 @@ export async function regenerateLeadAction(id: string, notes?: string) {
 
   revalidatePath("/");
   revalidatePath(`/audit/${parsed.data}`);
+  await trackEvent("audit_regenerated", { leadId: parsed.data }, parsed.data);
+  await writeAuditLog({ action: "lead.audit.regenerate", actorRole, leadId: parsed.data });
   return { ok: true };
 }
 
 export async function importLeadsCsvAction(_prevState: unknown, formData: FormData) {
+  const actorRole = await requireRole(["admin", "sales"]);
   const pastedCsv = String(formData.get("csvText") ?? "");
   const file = formData.get("csvFile");
   const fileCsv = file instanceof File && file.size > 0 ? await file.text() : "";
@@ -331,14 +357,17 @@ export async function importLeadsCsvAction(_prevState: unknown, formData: FormDa
 
   revalidatePath("/");
   const error = errors.slice(0, 2).join(" ");
+  await writeAuditLog({ action: "lead.csv.import", actorRole, metadata: { totalRows: rows.length, imported, skipped, failed } });
   return { ok: true, imported, skipped, failed, queued: false, jobId: "", error };
 }
 
 export async function deleteLeadAction(id: string) {
+  const actorRole = await requireRole(["admin"]);
   const parsed = z.string().min(1).safeParse(id);
   if (!parsed.success) return { ok: false, error: "Invalid lead id." };
 
   await prisma.lead.delete({ where: { id: parsed.data } });
   revalidatePath("/");
+  await writeAuditLog({ action: "lead.delete", actorRole, leadId: parsed.data });
   return { ok: true };
 }

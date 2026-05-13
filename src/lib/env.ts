@@ -1,0 +1,69 @@
+import { z } from "zod";
+
+const envSchema = z.object({
+  NODE_ENV: z.enum(["development", "test", "production"]).default("development"),
+  DATABASE_URL: z.string().min(1),
+  APP_URL: z.string().url().optional(),
+  NEXT_PUBLIC_APP_URL: z.string().url().optional(),
+  NEXT_PUBLIC_CALENDLY_URL: z.string().url().optional(),
+
+  ANTHROPIC_API_KEY: z.string().optional(),
+  ANTHROPIC_MODEL: z.string().optional(),
+  GEMINI_API_KEY: z.string().optional(),
+  GEMINI_MODEL: z.string().optional(),
+
+  APP_AUTH_ENABLED: z.enum(["true", "false"]).optional(),
+  SESSION_SECRET: z.string().optional(),
+  AUTH_ADMIN_PASSWORD: z.string().optional(),
+  AUTH_SALES_PASSWORD: z.string().optional(),
+  AUTH_VIEWER_PASSWORD: z.string().optional(),
+
+  AUDIT_LINK_SECRET: z.string().optional(),
+  AUDIT_LINK_TTL_SECONDS: z.string().optional(),
+
+  STRIPE_SECRET_KEY: z.string().optional(),
+  STRIPE_WEBHOOK_SECRET: z.string().optional(),
+
+  CRM_WEBHOOK_URL: z.string().url().optional(),
+  CRM_WEBHOOK_SECRET: z.string().optional(),
+
+  PUBLIC_INGEST_API_KEY: z.string().optional(),
+  PUBLIC_INGEST_API_SECRET: z.string().optional(),
+});
+
+type ParsedEnv = z.infer<typeof envSchema>;
+
+let cachedEnv: ParsedEnv | null = null;
+
+export function getEnv(): ParsedEnv {
+  if (cachedEnv) return cachedEnv;
+  cachedEnv = envSchema.parse(process.env);
+  return cachedEnv;
+}
+
+export function isAuthEnabled() {
+  const env = getEnv();
+  return env.APP_AUTH_ENABLED === "true";
+}
+
+export function assertProductionEnv() {
+  const env = getEnv();
+  const shouldEnforce = env.NODE_ENV === "production" && (process.env.ENFORCE_ENV_VALIDATION === "true" || process.env.NETLIFY === "true");
+  if (!shouldEnforce) return;
+
+  const requiredInProd = z.object({
+    APP_URL: z.string().url(),
+    SESSION_SECRET: z.string().min(24),
+    AUDIT_LINK_SECRET: z.string().min(24),
+  });
+  requiredInProd.parse({
+    APP_URL: env.APP_URL,
+    SESSION_SECRET: env.SESSION_SECRET,
+    AUDIT_LINK_SECRET: env.AUDIT_LINK_SECRET,
+  });
+}
+
+export function getAppOrigin() {
+  const env = getEnv();
+  return env.NEXT_PUBLIC_APP_URL || env.APP_URL || "";
+}

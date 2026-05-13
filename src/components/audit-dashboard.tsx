@@ -29,6 +29,7 @@ type LeadRow = {
   notes: string | null;
   status: string;
   score: number;
+  publicAuditPath: string;
   packageName: string;
   customPrice: number | null;
   stripePaymentUrl: string | null;
@@ -44,6 +45,8 @@ type LeadRow = {
   lastViewedAt: string | null;
   paymentClickCount: number;
   lastPaymentClickedAt: string | null;
+  paymentStatus: string;
+  lastPaymentAt: string | null;
   createdAt: string;
   updatedAt: string;
 };
@@ -165,11 +168,15 @@ export function AuditDashboard({
   caseStudies,
   todayActivity,
   latestImportJob,
+  importJobs,
+  opsMetrics,
 }: {
   leads: LeadRow[];
   caseStudies: CaseStudyRow[];
   todayActivity: { calls: number; sms: number; emails: number };
   latestImportJob: ImportJobView | null;
+  importJobs: ImportJobView[];
+  opsMetrics: { queueDepth: number; failedJobsCount: number; eventsLast24h: number };
 }) {
   const router = useRouter();
   const [state, formAction] = useActionState(createLeadAction, initialState);
@@ -202,6 +209,7 @@ export function AuditDashboard({
   const [goalInput, setGoalInput] = useState("");
   const goalInputRef = useRef<HTMLInputElement>(null);
   const [activeImportJob, setActiveImportJob] = useState<ImportJobView | null>(latestImportJob);
+  const [recentImportJobs, setRecentImportJobs] = useState<ImportJobView[]>(importJobs);
   const isImportTickingRef = useRef(false);
   const didRefreshCompletedImportRef = useRef(false);
   const queuedImportJobId = importState.ok && importState.queued ? importState.jobId : "";
@@ -231,10 +239,16 @@ export function AuditDashboard({
       if (cancelled || isImportTickingRef.current) return;
       isImportTickingRef.current = true;
       try {
+        await fetch("/api/import-jobs", { method: "POST" });
         const statusRes = await fetch(`/api/import-jobs/${trackedImportJobId}`, { cache: "no-store" });
         if (!statusRes.ok) return;
         const payload = (await statusRes.json()) as { ok?: boolean; job?: ImportJobView };
         if (!cancelled && payload.job) setActiveImportJob(payload.job);
+        const listRes = await fetch("/api/import-jobs", { cache: "no-store" });
+        if (listRes.ok) {
+          const listPayload = (await listRes.json()) as { jobs?: ImportJobView[] };
+          if (!cancelled && listPayload.jobs) setRecentImportJobs(listPayload.jobs);
+        }
       } finally {
         isImportTickingRef.current = false;
       }
@@ -257,6 +271,21 @@ export function AuditDashboard({
     didRefreshCompletedImportRef.current = true;
     router.refresh();
   }, [activeImportJob, router]);
+
+  const updateImportJob = async (jobId: string, action: "cancel" | "retry") => {
+    await fetch(`/api/import-jobs/${jobId}`, {
+      method: "POST",
+      headers: { "content-type": "application/json" },
+      body: JSON.stringify({ action }),
+    });
+    const listRes = await fetch("/api/import-jobs", { cache: "no-store" });
+    if (listRes.ok) {
+      const payload = (await listRes.json()) as { jobs?: ImportJobView[] };
+      if (payload.jobs) setRecentImportJobs(payload.jobs);
+      const active = payload.jobs?.find((job) => job.status === "Queued" || job.status === "Running") ?? null;
+      setActiveImportJob(active);
+    }
+  };
 
   const parsedLeads = useMemo<LeadView[]>(
     () =>
@@ -383,13 +412,13 @@ export function AuditDashboard({
       .map(({ lead }) => lead);
   }, [nowMs, parsedLeads]);
 
-  const auditUrl = (id: string) => `${typeof window !== "undefined" ? window.location.origin : ""}/audit/${id}`;
+  const auditUrl = (lead: LeadView) => `${typeof window !== "undefined" ? window.location.origin : ""}${lead.publicAuditPath}`;
 
-  const copyAuditUrl = async (id: string) => {
-    await navigator.clipboard.writeText(auditUrl(id));
-    setCopiedLeadId(id);
-    void logOutreachAction(id, "Share", "Copied public audit link");
-    window.setTimeout(() => setCopiedLeadId((current) => (current === id ? "" : current)), 1800);
+  const copyAuditUrl = async (lead: LeadView) => {
+    await navigator.clipboard.writeText(auditUrl(lead));
+    setCopiedLeadId(lead.id);
+    void logOutreachAction(lead.id, "Share", "Copied public audit link");
+    window.setTimeout(() => setCopiedLeadId((current) => (current === lead.id ? "" : current)), 1800);
   };
 
   const deleteLead = (id: string, name: string) => {
@@ -482,12 +511,12 @@ export function AuditDashboard({
     void logOutreachAction(id, "Email", "Opened email draft with public audit link");
   };
 
-  const smsDraftUrl = (lead: LeadView) => `sms:${lead.phone ?? ""}?&body=${encodeURIComponent(`Hi, this is Hamid with Presence Labs. I made a quick online presence audit for ${lead.businessName}: ${auditUrl(lead.id)}`)}`;
-  const whatsappDraftUrl = (lead: LeadView) => `https://wa.me/${(lead.phone ?? "").replace(/\D/g, "")}?text=${encodeURIComponent(`Hi, this is Hamid with Presence Labs. I made a quick online presence audit for ${lead.businessName}: ${auditUrl(lead.id)}`)}`;
+  const smsDraftUrl = (lead: LeadView) => `sms:${lead.phone ?? ""}?&body=${encodeURIComponent(`Hi, this is Hamid with Presence Labs. I made a quick online presence audit for ${lead.businessName}: ${auditUrl(lead)}`)}`;
+  const whatsappDraftUrl = (lead: LeadView) => `https://wa.me/${(lead.phone ?? "").replace(/\D/g, "")}?text=${encodeURIComponent(`Hi, this is Hamid with Presence Labs. I made a quick online presence audit for ${lead.businessName}: ${auditUrl(lead)}`)}`;
 
   const emailDraftUrl = (lead: LeadView) => {
     const subject = `Online Presence Audit: ${lead.category || "Local Business"} - ${lead.businessName}`;
-    const body = `Hi,\n\nI put together a quick online presence audit for ${lead.businessName}. It highlights a few ways the business may be able to turn more Google/profile visitors into calls or booked jobs.\n\nAudit link: ${auditUrl(lead.id)}\n\nBest,\nHamid\nPresence Labs`;
+    const body = `Hi,\n\nI put together a quick online presence audit for ${lead.businessName}. It highlights a few ways the business may be able to turn more Google/profile visitors into calls or booked jobs.\n\nAudit link: ${auditUrl(lead)}\n\nBest,\nHamid\nPresence Labs`;
     return `mailto:?subject=${encodeURIComponent(subject)}&body=${encodeURIComponent(body)}`;
   };
 
@@ -658,6 +687,47 @@ export function AuditDashboard({
                   {activeImportJob.errorSummary ? <p className="mt-2 text-[11px] font-bold text-rose-700">{activeImportJob.errorSummary}</p> : null}
                 </div>
               ) : null}
+              {recentImportJobs.length ? (
+                <div className="rounded-xl border border-slate-200 bg-white p-3">
+                  <p className="text-[11px] font-black uppercase tracking-[0.14em] text-slate-500">Recent import jobs</p>
+                  <div className="mt-2 grid gap-2">
+                    {recentImportJobs.slice(0, 5).map((job) => (
+                      <div key={job.id} className="rounded-lg border border-slate-100 bg-slate-50 p-2 text-[11px]">
+                        <p className="font-black text-slate-700">
+                          {job.status} • {job.processedRows}/{job.totalRows}
+                        </p>
+                        <p className="text-slate-500">
+                          Imported {job.importedRows} • Failed {job.failedRows}
+                        </p>
+                        <div className="mt-1 flex gap-2">
+                          {job.status === "Running" || job.status === "Queued" ? (
+                            <button
+                              type="button"
+                              onClick={() => {
+                                void updateImportJob(job.id, "cancel");
+                              }}
+                              className="rounded-md border border-rose-200 bg-rose-50 px-2 py-1 font-black text-rose-700"
+                            >
+                              Cancel
+                            </button>
+                          ) : null}
+                          {job.status === "Failed" || job.status === "Cancelled" ? (
+                            <button
+                              type="button"
+                              onClick={() => {
+                                void updateImportJob(job.id, "retry");
+                              }}
+                              className="rounded-md border border-lime-200 bg-lime-50 px-2 py-1 font-black text-lime-700"
+                            >
+                              Retry
+                            </button>
+                          ) : null}
+                        </div>
+                      </div>
+                    ))}
+                  </div>
+                </div>
+              ) : null}
             </form>
           </div>
 
@@ -694,6 +764,9 @@ export function AuditDashboard({
             <div className="rounded-[2rem] border border-slate-200 bg-white p-5 shadow-sm"><p className="text-xs font-black uppercase tracking-[0.18em] text-slate-400">Total Pipeline</p><p className="mt-2 text-3xl font-black">{formatMoney(moneyStats.totalPipeline)}</p><p className="mt-1 text-xs font-bold text-slate-500">New + Contacted + Follow-up</p></div>
             <div className="rounded-[2rem] border border-slate-200 bg-white p-5 shadow-sm"><p className="text-xs font-black uppercase tracking-[0.18em] text-slate-400">Weighted Pipeline</p><p className="mt-2 text-3xl font-black text-lime-700">{formatMoney(moneyStats.weightedPipeline)}</p><p className="mt-1 text-xs font-bold text-slate-500">20/40/70% stage weighting</p></div>
             <div className="rounded-[2rem] border border-slate-200 bg-white p-5 shadow-sm"><p className="text-xs font-black uppercase tracking-[0.18em] text-slate-400">Won Revenue</p><p className="mt-2 text-3xl font-black">{formatMoney(moneyStats.wonRevenue)}</p><p className="mt-1 text-xs font-bold text-slate-500">Closed local Presence Labs work</p></div>
+            <div className="rounded-[2rem] border border-slate-200 bg-white p-5 shadow-sm"><p className="text-xs font-black uppercase tracking-[0.18em] text-slate-400">Ops Queue Depth</p><p className="mt-2 text-3xl font-black">{opsMetrics.queueDepth}</p><p className="mt-1 text-xs font-bold text-slate-500">Queued/Running imports</p></div>
+            <div className="rounded-[2rem] border border-slate-200 bg-white p-5 shadow-sm"><p className="text-xs font-black uppercase tracking-[0.18em] text-slate-400">Failed Jobs</p><p className="mt-2 text-3xl font-black">{opsMetrics.failedJobsCount}</p><p className="mt-1 text-xs font-bold text-slate-500">Import jobs needing retry</p></div>
+            <div className="rounded-[2rem] border border-slate-200 bg-white p-5 shadow-sm"><p className="text-xs font-black uppercase tracking-[0.18em] text-slate-400">Events (24h)</p><p className="mt-2 text-3xl font-black">{opsMetrics.eventsLast24h}</p><p className="mt-1 text-xs font-bold text-slate-500">Tracked lead/payment events</p></div>
             {/* Monthly Goal Card */}
             <div className="rounded-[2rem] border border-slate-200 bg-white p-5 shadow-sm">
               <div className="flex items-center justify-between gap-2">
@@ -741,7 +814,7 @@ export function AuditDashboard({
                 {strikeLeads.map((lead) => {
                   const viewedMinAgo = Math.floor((nowMs - new Date(lead.lastViewedAt ?? 0).getTime()) / 60000);
                   const strikeCallScript = `Hey, this is Hamid from Presence Labs. I saw someone just reviewed the online presence audit I put together for ${lead.businessName}. I wanted to make sure you got it — did you have a chance to look it over? I found ${lead.score >= 70 ? "several" : "a few"} conversion gaps that are costing you calls. Happy to walk you through the findings in 5 minutes.`;
-                  const strikeSmsBody = `Hey! This is Hamid with Presence Labs — just noticed someone reviewed the audit I put together for ${lead.businessName}. Did you get a chance to see it? Happy to answer any questions or jump on a quick call. Here's the audit link: ${typeof window !== "undefined" ? window.location.origin : ""}/audit/${lead.id}`;
+                  const strikeSmsBody = `Hey! This is Hamid with Presence Labs — just noticed someone reviewed the audit I put together for ${lead.businessName}. Did you get a chance to see it? Happy to answer any questions or jump on a quick call. Here's the audit link: ${auditUrl(lead)}`;
                   const strikeSmsUrl = lead.phone ? `sms:${lead.phone}?&body=${encodeURIComponent(strikeSmsBody)}` : "";
                   return (
                     <div key={lead.id} className="rounded-2xl border border-amber-200 bg-white p-4 shadow-sm">
@@ -935,6 +1008,8 @@ export function AuditDashboard({
                       <span className="block font-black">{lead.businessName}</span>
                       <span className={`rounded-full border px-2.5 py-1 text-xs font-black ${statusTone(lead.status)}`}>{lead.status}</span>
                       {(lead.stripePaymentUrl || lead.attachedCaseStudyId || lead.paymentClickCount > 0) ? <span className="rounded-full bg-lime-300 px-2.5 py-1 text-xs font-black text-slate-950">HIGH INTENT</span> : null}
+                      {lead.paymentStatus === "paid" ? <span className="rounded-full bg-emerald-500 px-2.5 py-1 text-xs font-black text-white">PAID</span> : null}
+                      {lead.paymentStatus === "checkout_started" ? <span className="rounded-full bg-amber-200 px-2.5 py-1 text-xs font-black text-amber-900">CHECKOUT STARTED</span> : null}
                       <span className="text-xs font-black uppercase tracking-[0.14em] text-slate-400">Updated {formatRelativeTime(lead.updatedAt)}</span>
                     </span>
                     <span className="mt-1 block text-sm text-slate-500">{lead.category || "Local business"} • {lead.location || "Bay Area"} • Est. {formatMoney(estimatedDealValue(lead.packageName || lead.assets.recommendedPackage, lead.customPrice))}</span>
@@ -948,7 +1023,7 @@ export function AuditDashboard({
                     <Link href={`/prep/${lead.id}`} target="_blank" onClick={(event) => event.stopPropagation()} className="inline-flex items-center gap-1 rounded-xl bg-lime-300 px-3 py-2 text-xs font-black text-slate-950 transition hover:bg-lime-200">
                       📋 Prep
                     </Link>
-                    <button type="button" onClick={(event) => { event.stopPropagation(); void copyAuditUrl(lead.id); }} className="inline-flex items-center gap-1 rounded-xl border border-slate-200 bg-white px-3 py-2 text-xs font-black text-slate-700 transition hover:bg-slate-50">
+                    <button type="button" onClick={(event) => { event.stopPropagation(); void copyAuditUrl(lead); }} className="inline-flex items-center gap-1 rounded-xl border border-slate-200 bg-white px-3 py-2 text-xs font-black text-slate-700 transition hover:bg-slate-50">
                       <Share2 className="size-4" /> {copiedLeadId === lead.id ? "Copied!" : "Share audit"}
                     </button>
                     <a href={emailDraftUrl(lead)} target="_blank" onClick={(event) => { event.stopPropagation(); markEmailDrafted(lead.id); }} className="inline-flex items-center gap-1 rounded-xl border border-slate-200 bg-white px-3 py-2 text-xs font-black text-slate-700 transition hover:bg-slate-50">
