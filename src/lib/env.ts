@@ -74,11 +74,13 @@ export function assertProductionEnv() {
   if (!shouldEnforce) return;
 
   const requiredInProd = z.object({
+    DATABASE_URL: z.string().regex(/^postgres(ql)?:\/\//i, "DATABASE_URL must be a postgres connection string."),
     APP_URL: z.string().url(),
     SESSION_SECRET: z.string().min(24),
     AUDIT_LINK_SECRET: z.string().min(24),
   });
   requiredInProd.parse({
+    DATABASE_URL: env.DATABASE_URL,
     APP_URL: env.APP_URL,
     SESSION_SECRET: env.SESSION_SECRET,
     AUDIT_LINK_SECRET: env.AUDIT_LINK_SECRET,
