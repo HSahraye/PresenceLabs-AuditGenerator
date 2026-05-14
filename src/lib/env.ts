@@ -83,7 +83,14 @@ export function assertProductionEnv() {
     SESSION_SECRET: env.SESSION_SECRET,
     AUDIT_LINK_SECRET: env.AUDIT_LINK_SECRET,
   });
-  if (env.APP_AUTH_ENABLED === "true") {
+  if (env.APP_AUTH_ENABLED === "true" && !env.BETTER_AUTH_SECRET) {
+    // Keep validation aligned with runtime auth config, which falls back to SESSION_SECRET.
+    z.object({
+      SESSION_SECRET: z.string().min(24),
+    }).parse({
+      SESSION_SECRET: env.SESSION_SECRET,
+    });
+  } else if (env.APP_AUTH_ENABLED === "true" && env.BETTER_AUTH_SECRET) {
     z.object({
       BETTER_AUTH_SECRET: z.string().min(24),
     }).parse({
