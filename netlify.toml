@@ -1,5 +1,5 @@
 [build]
-  command = "npm run db:generate && npm run build"
+  command = "npm run db:generate && npm run db:push && npm run build"
   publish = ".next"
 
 [build.environment]
