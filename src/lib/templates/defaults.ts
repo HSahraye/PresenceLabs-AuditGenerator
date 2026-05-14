@@ -1,0 +1,83 @@
+import type { AuditTemplateConfig, OfferTemplateConfig, OutreachTemplateConfig } from "@/lib/templates/types";
+
+export const SYSTEM_DEFAULT_AUDIT_TEMPLATES: Record<string, AuditTemplateConfig> = {
+  "Local SEO Agency": {
+    tone: "seo-focused",
+    ctaStyle: "consultative",
+    sectionOrder: ["executiveSummary", "seoOpportunities", "conversionBlockers", "trustIssues", "revenueOpportunities", "quickWins", "recommendedNextSteps"],
+    emphasis: ["local visibility", "google profile", "service pages"],
+    packageLabels: {},
+    guaranteeStyle: "rank-and-convert baseline",
+    urgencyStyle: "balanced",
+    outreachStyle: "consultative",
+    proposalStyle: "performance",
+  },
+  "Premium Branding Agency": {
+    tone: "premium",
+    ctaStyle: "soft",
+    sectionOrder: ["executiveSummary", "trustIssues", "conversionBlockers", "revenueOpportunities", "quickWins", "recommendedNextSteps"],
+    emphasis: ["brand perception", "trust layer", "premium positioning"],
+    packageLabels: {},
+    guaranteeStyle: "brand confidence",
+    urgencyStyle: "calm",
+    outreachStyle: "premium",
+    proposalStyle: "premium",
+  },
+  "Direct-Response PPC Agency": {
+    tone: "direct-response",
+    ctaStyle: "direct",
+    sectionOrder: ["executiveSummary", "revenueOpportunities", "conversionBlockers", "quickWins", "recommendedNextSteps"],
+    emphasis: ["speed-to-lead", "landing conversion", "ROI"],
+    packageLabels: {},
+    guaranteeStyle: "pipeline impact",
+    urgencyStyle: "urgent",
+    outreachStyle: "roi",
+    proposalStyle: "performance",
+  },
+  "Reputation Management Agency": {
+    tone: "authority",
+    ctaStyle: "consultative",
+    sectionOrder: ["executiveSummary", "trustIssues", "revenueOpportunities", "quickWins", "recommendedNextSteps"],
+    emphasis: ["reviews", "social proof", "credibility"],
+    packageLabels: {},
+    guaranteeStyle: "trust recovery",
+    urgencyStyle: "balanced",
+    outreachStyle: "local-trust",
+    proposalStyle: "value",
+  },
+  "General Growth Agency": {
+    tone: "consultative",
+    ctaStyle: "consultative",
+    sectionOrder: ["executiveSummary", "revenueOpportunities", "conversionBlockers", "seoOpportunities", "quickWins", "recommendedNextSteps"],
+    emphasis: ["sustainable growth", "conversion improvements"],
+    packageLabels: {},
+    guaranteeStyle: "measurable growth",
+    urgencyStyle: "balanced",
+    outreachStyle: "consultative",
+    proposalStyle: "value",
+  },
+};
+
+export const SYSTEM_DEFAULT_OUTREACH_TEMPLATE: OutreachTemplateConfig = {
+  tone: "consultative",
+  ctaStyle: "consultative",
+  sectionOrder: ["coldOpen", "diagnosis", "value", "cta"],
+  emphasis: ["specific observation", "quick win", "low-friction next step"],
+  packageLabels: {},
+  guaranteeStyle: "risk-reduced",
+  urgencyStyle: "balanced",
+  outreachStyle: "consultative",
+  proposalStyle: "value",
+};
+
+export const SYSTEM_DEFAULT_OFFER_TEMPLATE: OfferTemplateConfig = {
+  tone: "authority",
+  ctaStyle: "direct",
+  sectionOrder: ["roi", "timeline", "deliverables", "guarantees", "onboarding", "socialProof"],
+  emphasis: ["business outcomes", "timeline confidence"],
+  packageLabels: {},
+  guaranteeStyle: "outcome-oriented",
+  urgencyStyle: "balanced",
+  outreachStyle: "consultative",
+  proposalStyle: "value",
+};

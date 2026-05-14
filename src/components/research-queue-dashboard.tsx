@@ -5,6 +5,7 @@ import { useActionState, useMemo, useState, useTransition } from "react";
 import { useFormStatus } from "react-dom";
 import { ArrowLeft, ExternalLink, Loader2, Plus, Radar, Search, Sparkles } from "lucide-react";
 import { addResearchQueueItemsAction, convertQueueItemToLeadAction, updateResearchQueueStatusAction } from "@/app/actions/research-queue";
+import { BRAND } from "@/lib/brand";
 import { formatRelativeTime } from "@/lib/utils";
 
 type QueueStatus = "Queued" | "Researching" | "Audited" | "Converted" | "Skipped";
@@ -150,7 +151,7 @@ export function ResearchQueueDashboard({ items }: { items: QueueItem[] }) {
         <div className="mx-auto flex max-w-7xl flex-col gap-4 sm:flex-row sm:items-center sm:justify-between">
           <div>
             <Link href="/" className="inline-flex items-center gap-2 text-xs font-black uppercase tracking-[0.18em] text-slate-500 hover:text-slate-950"><ArrowLeft className="size-4" /> Dashboard</Link>
-            <p className="mt-3 text-xs font-black uppercase tracking-[0.28em] text-lime-700">Presence Labs</p>
+            <p className="mt-3 text-xs font-black uppercase tracking-[0.28em] text-lime-700">{BRAND.productName}</p>
             <h1 className="mt-1 text-2xl font-black tracking-tight sm:text-3xl">Lead Research Queue</h1>
           </div>
           <div className="flex items-center gap-3 rounded-2xl border border-slate-200 bg-slate-950 px-4 py-3 text-white">

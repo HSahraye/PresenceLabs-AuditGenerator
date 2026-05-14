@@ -1,5 +1,6 @@
 import { NextResponse } from "next/server";
 import { prisma } from "@/lib/prisma";
+import { getWorkspaceContext, withWorkspaceFallbackScope } from "@/lib/workspace";
 
 type Params = { params: Promise<{ id: string }> };
 
@@ -18,7 +19,8 @@ export async function OPTIONS(request: Request) {
 export async function GET(request: Request, { params }: Params) {
   const origin = request.headers.get("origin");
   const { id } = await params;
-  const job = await prisma.importJob.findUnique({ where: { id } });
+  const { workspaceId } = await getWorkspaceContext();
+  const job = await prisma.importJob.findFirst({ where: { id, ...withWorkspaceFallbackScope(workspaceId) } });
   if (!job) return NextResponse.json({ ok: false, error: "Not found." }, { status: 404, headers: corsHeaders(origin) });
   return NextResponse.json(
     {

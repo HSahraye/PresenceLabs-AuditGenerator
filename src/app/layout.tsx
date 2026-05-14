@@ -1,6 +1,7 @@
 import type { Metadata } from "next";
 import { Geist, Geist_Mono } from "next/font/google";
 import "./globals.css";
+import { BRAND } from "@/lib/brand";
 import { assertProductionEnv, getAppOrigin } from "@/lib/env";
 
 const geistSans = Geist({
@@ -14,9 +15,13 @@ const geistMono = Geist_Mono({
 });
 
 export const metadata: Metadata = {
-  title: "Presence Labs — Lead Pipeline",
-  description: "Score leads, generate audits, track outreach, and close local business clients for Presence Labs.",
+  title: `${BRAND.productName} — ${BRAND.tagline}`,
+  description: BRAND.description,
   metadataBase: getAppOrigin() ? new URL(getAppOrigin()) : undefined,
+  icons: {
+    icon: "/brand/auditgen-icon.svg",
+    apple: "/brand/auditgen-icon.svg",
+  },
 };
 
 export default function RootLayout({
@@ -28,6 +33,7 @@ export default function RootLayout({
   return (
     <html
       lang="en"
+      data-scroll-behavior="smooth"
       className={`${geistSans.variable} ${geistMono.variable} h-full antialiased`}
     >
       <body className="min-h-full flex flex-col">{children}</body>

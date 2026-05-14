@@ -1,9 +1,10 @@
 "use client";
 
 import Link from "next/link";
-import { useState, useTransition } from "react";
+import { useMemo, useState, useTransition } from "react";
 import { ArrowLeft, CheckCircle2, Clock, Loader2, Mail, Phone, PhoneCall, PhoneOff, Voicemail } from "lucide-react";
 import { logOutreachAction } from "@/app/actions/leads";
+import { getLeadPriorityState } from "@/lib/intelligence/selectors";
 import { formatMoney } from "@/lib/money";
 import { formatRelativeTime } from "@/lib/utils";
 
@@ -23,6 +24,7 @@ type LeadRow = {
   customPrice: number | null;
   painSummary: string;
   assetsJson: string;
+  intelligenceJson: string | null;
   nextFollowUpAt: string | null;
   lastContactedAt: string | null;
 };
@@ -59,6 +61,7 @@ export function CallTodayDashboard({ leads }: { leads: LeadRow[] }) {
   const [done, setDone] = useState<Set<string>>(new Set());
   const [pendingId, setPendingId] = useState<string | null>(null);
   const [nextFollowUp, setNextFollowUp] = useState<Record<string, string>>({});
+  const [visibleCount, setVisibleCount] = useState(18);
   const [, startTransition] = useTransition();
 
   const today = new Date().toISOString().slice(0, 10);
@@ -66,6 +69,19 @@ export function CallTodayDashboard({ leads }: { leads: LeadRow[] }) {
 
   const remaining = leads.filter((l) => !done.has(l.id));
   const completedCount = done.size;
+  const visibleLeads = useMemo(
+    () =>
+      remaining.slice(0, visibleCount).map((lead) => {
+        let assets: Record<string, unknown> = {};
+        try {
+          assets = JSON.parse(lead.assetsJson) as Record<string, unknown>;
+        } catch {
+          assets = {};
+        }
+        return { lead, assets };
+      }),
+    [remaining, visibleCount],
+  );
 
   const logQuick = (lead: LeadRow, action: QuickAction) => {
     if (pendingId) return;
@@ -132,23 +148,25 @@ export function CallTodayDashboard({ leads }: { leads: LeadRow[] }) {
 
         {/* Lead cards */}
         <div className="grid gap-4">
-          {remaining.map((lead) => {
-            const assets = (() => {
-              try { return JSON.parse(lead.assetsJson); } catch { return {}; }
-            })();
+          {visibleLeads.map(({ lead, assets }) => {
             const isPending = pendingId === lead.id;
-            const price = lead.customPrice ?? assets.recommendedInvestment ?? null;
-            const callScript: string | undefined = assets.callScript ?? assets.coldCallScript;
+            const price = lead.customPrice ?? (typeof assets.recommendedInvestment === "number" ? assets.recommendedInvestment : null);
+            const callScript = typeof assets.callScript === "string"
+              ? assets.callScript
+              : typeof assets.coldCallScript === "string"
+                ? assets.coldCallScript
+                : undefined;
+            const priorityState = getLeadPriorityState(lead);
 
             return (
               <div key={lead.id} className={`rounded-3xl border bg-white shadow-sm transition-all ${lead.score >= 8 ? "border-lime-300" : "border-slate-200"}`}>
                 {/* HOT badge */}
-                {lead.score >= 8 && (
+                {priorityState === "HOT" && (
                   <div className="flex items-center gap-1 rounded-t-3xl bg-lime-300 px-4 py-1.5">
                     <span className="text-xs font-black text-slate-950">🔥 HOT LEAD</span>
                   </div>
                 )}
-                {lead.score < 8 && lead.lastContactedAt && (new Date().getTime() - new Date(lead.lastContactedAt).getTime() >= 3 * 24 * 60 * 60 * 1000) && (
+                {(priorityState === "REENGAGE" || priorityState === "STALE") && (
                   <div className="flex items-center gap-1 rounded-t-3xl bg-orange-200 px-4 py-1.5">
                     <span className="text-xs font-black text-orange-800">👻 GHOST — RE-ENGAGE</span>
                   </div>
@@ -248,6 +266,15 @@ export function CallTodayDashboard({ leads }: { leads: LeadRow[] }) {
               </div>
             );
           })}
+          {remaining.length > visibleCount ? (
+            <button
+              type="button"
+              onClick={() => setVisibleCount((count) => count + 18)}
+              className="h-11 rounded-2xl border border-slate-200 bg-white text-sm font-black text-slate-700 transition hover:bg-slate-50"
+            >
+              Load more leads ({remaining.length - visibleCount} remaining)
+            </button>
+          ) : null}
         </div>
       </div>
     </div>

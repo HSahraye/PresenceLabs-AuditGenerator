@@ -3,11 +3,16 @@
 import { revalidatePath } from "next/cache";
 import { z } from "zod";
 import { generateAudit } from "@/lib/audit-engine";
+import { enforceAuditGeneration, ensureWorkspaceOperational } from "@/lib/billing/entitlements";
+import { incrementUsageMetric } from "@/lib/billing/usage";
 import { parseCsv, pick } from "@/lib/csv";
+import { trackProductAnalytics } from "@/lib/analytics/product";
+import { markOnboardingMilestone } from "@/lib/onboarding";
 import { prisma } from "@/lib/prisma";
 import { requireRole } from "@/lib/auth";
 import { writeAuditLog } from "@/lib/audit-log";
 import { trackEvent } from "@/lib/events";
+import { getWorkspaceContext, withWorkspaceFallbackScope } from "@/lib/workspace";
 
 const queueStatuses = ["Queued", "Researching", "Audited", "Converted", "Skipped"] as const;
 
@@ -53,6 +58,7 @@ function normalizeWebsite(value?: string | null) {
 
 export async function addResearchQueueItemsAction(_prevState: unknown, formData: FormData) {
   const actorRole = await requireRole(["admin", "sales"]);
+  const { workspaceId } = await getWorkspaceContext();
   const rawText = String(formData.get("items") ?? "");
   const source = String(formData.get("source") ?? "manual paste");
   const priority = Number(formData.get("priority") ?? 3);
@@ -84,6 +90,7 @@ export async function addResearchQueueItemsAction(_prevState: unknown, formData:
     const websiteKey = normalizeWebsite(parsed.data.websiteUrl);
     const existing = await prisma.researchQueueItem.findFirst({
       where: {
+        ...withWorkspaceFallbackScope(workspaceId),
         OR: [
           websiteKey ? { websiteUrl: { contains: websiteKey } } : undefined,
           parsed.data.location ? { AND: [{ businessName: parsed.data.businessName }, { location: parsed.data.location }] } : { businessName: parsed.data.businessName },
@@ -98,6 +105,7 @@ export async function addResearchQueueItemsAction(_prevState: unknown, formData:
 
     await prisma.researchQueueItem.create({
       data: {
+        workspaceId,
         ...parsed.data,
         websiteUrl: parsed.data.websiteUrl || null,
         location: parsed.data.location || null,
@@ -112,30 +120,37 @@ export async function addResearchQueueItemsAction(_prevState: unknown, formData:
   }
 
   revalidatePath("/research");
-  await writeAuditLog({ action: "research.queue.add", actorRole, metadata: { added, skipped } });
+  await writeAuditLog({ action: "research.queue.add", actorRole, metadata: { added, skipped }, workspaceId });
   return { ok: true, added, skipped, error: "" };
 }
 
 export async function updateResearchQueueStatusAction(id: string, status: string) {
   const actorRole = await requireRole(["admin", "sales"]);
+  const { workspaceId } = await getWorkspaceContext();
   const parsed = queueStatusSchema.safeParse({ id, status });
   if (!parsed.success) return { ok: false, error: "Invalid queue status." };
-  await prisma.researchQueueItem.update({ where: { id: parsed.data.id }, data: { status: parsed.data.status } });
+  await prisma.researchQueueItem.updateMany({ where: { id: parsed.data.id, ...withWorkspaceFallbackScope(workspaceId) }, data: { status: parsed.data.status } });
   revalidatePath("/research");
-  await writeAuditLog({ action: "research.queue.status", actorRole, leadId: parsed.data.id, metadata: { status: parsed.data.status } });
+  await writeAuditLog({ action: "research.queue.status", actorRole, leadId: parsed.data.id, metadata: { status: parsed.data.status }, workspaceId });
   return { ok: true };
 }
 
 export async function convertQueueItemToLeadAction(id: string) {
   const actorRole = await requireRole(["admin", "sales"]);
+  const { workspaceId } = await getWorkspaceContext();
+  const workspaceState = await ensureWorkspaceOperational(workspaceId);
+  if (!workspaceState.ok) return { ok: false, error: workspaceState.reason };
+  const entitlement = await enforceAuditGeneration(workspaceId);
+  if (!entitlement.allowed) return { ok: false, error: entitlement.reason || "Audit generation limit reached." };
   const parsed = z.string().min(1).safeParse(id);
   if (!parsed.success) return { ok: false, error: "Invalid queue item." };
 
-  const item = await prisma.researchQueueItem.findUnique({ where: { id: parsed.data } });
+  const item = await prisma.researchQueueItem.findFirst({ where: { id: parsed.data, ...withWorkspaceFallbackScope(workspaceId) } });
   if (!item) return { ok: false, error: "Queue item not found." };
 
   const existingLead = await prisma.lead.findFirst({
     where: {
+      ...withWorkspaceFallbackScope(workspaceId),
       OR: [
         item.websiteUrl ? { websiteUrl: item.websiteUrl } : undefined,
         item.location ? { AND: [{ businessName: item.businessName }, { location: item.location }] } : { businessName: item.businessName },
@@ -143,7 +158,7 @@ export async function convertQueueItemToLeadAction(id: string) {
     },
   });
   if (existingLead) {
-    await prisma.researchQueueItem.update({ where: { id: item.id }, data: { status: "Converted", convertedLeadId: existingLead.id } });
+    await prisma.researchQueueItem.updateMany({ where: { id: item.id, ...withWorkspaceFallbackScope(workspaceId) }, data: { status: "Converted", convertedLeadId: existingLead.id } });
     revalidatePath("/research");
     return { ok: true, leadId: existingLead.id, reused: true };
   }
@@ -154,10 +169,12 @@ export async function convertQueueItemToLeadAction(id: string) {
     location: item.location ?? undefined,
     websiteUrl: item.websiteUrl ?? undefined,
     notes: item.notes ?? undefined,
+    workspaceId,
   });
 
   const lead = await prisma.lead.create({
     data: {
+      workspaceId,
       businessName: item.businessName,
       category: item.category,
       location: item.location,
@@ -172,13 +189,26 @@ export async function convertQueueItemToLeadAction(id: string) {
       painSummary: audit.assets.painPointSummary,
       auditJson: JSON.stringify({ checks: audit.checks, websiteSignals: audit.websiteSignals, warnings: audit.warnings, source: audit.source }, null, 2),
       assetsJson: JSON.stringify(audit.assets, null, 2),
+      intelligenceJson: JSON.stringify(audit.intelligence, null, 2),
+      generatedContextJson: audit.generatedContext ? JSON.stringify(audit.generatedContext, null, 2) : null,
     },
   });
 
-  await prisma.researchQueueItem.update({ where: { id: item.id }, data: { status: "Converted", convertedLeadId: lead.id } });
+  await prisma.researchQueueItem.updateMany({ where: { id: item.id, ...withWorkspaceFallbackScope(workspaceId) }, data: { status: "Converted", convertedLeadId: lead.id } });
   revalidatePath("/");
   revalidatePath("/research");
-  await trackEvent("lead_created", { leadId: lead.id, source: "research-queue" }, lead.id);
-  await writeAuditLog({ action: "research.queue.convert", actorRole, leadId: lead.id, metadata: { queueItemId: item.id } });
+  await incrementUsageMetric({ workspaceId, metric: "audits_generated", amount: 1, metadata: { source: "research_convert" } });
+  await incrementUsageMetric({ workspaceId, metric: "proposal_generations", amount: 1, metadata: { source: "research_convert" } });
+  await incrementUsageMetric({ workspaceId, metric: "outreach_generations", amount: 1, metadata: { source: "research_convert" } });
+  await incrementUsageMetric({ workspaceId, metric: "active_leads", amount: 1, metadata: { source: "research_convert" } });
+  await markOnboardingMilestone(workspaceId, "first_audit_generated", { leadId: lead.id });
+  await trackProductAnalytics({
+    workspaceId,
+    leadId: lead.id,
+    event: "activation.audit_generated",
+    properties: { source: "research_queue" },
+  });
+  await trackEvent("lead_created", { leadId: lead.id, source: "research-queue" }, lead.id, workspaceId);
+  await writeAuditLog({ action: "research.queue.convert", actorRole, leadId: lead.id, metadata: { queueItemId: item.id }, workspaceId });
   return { ok: true, leadId: lead.id, reused: false };
 }

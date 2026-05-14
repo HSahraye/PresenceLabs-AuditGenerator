@@ -1,8 +1,12 @@
 import { prisma } from "@/lib/prisma";
 import { pick } from "@/lib/csv";
 import { generateAudit } from "@/lib/audit-engine";
+import { enforceAuditGeneration, enforceImportLimit, ensureWorkspaceOperational } from "@/lib/billing/entitlements";
+import { incrementUsageMetric } from "@/lib/billing/usage";
 import { logger } from "./logger";
 import { trackEvent } from "./events";
+import { markOnboardingMilestone } from "@/lib/onboarding";
+import { getWorkspaceContext, withWorkspaceFallbackScope } from "./workspace";
 
 const DEFAULT_CHUNK_SIZE = 3;
 const RETRYABLE_IMPORT_ERRORS = [/429/, /rate limit/i, /timeout/i, /network/i, /5\d\d/];
@@ -51,7 +55,7 @@ export function serializeImportJob(job: {
   };
 }
 
-async function processRow(row: CsvRow, index: number) {
+async function processRow(row: CsvRow, index: number, workspaceId: string) {
   const businessName = pick(row, ["business name", "name", "business", "company"]);
   const websiteUrl = pick(row, ["website", "website url", "url", "site"]);
   const websiteKey = normalizeWebsiteKey(websiteUrl);
@@ -68,6 +72,7 @@ async function processRow(row: CsvRow, index: number) {
 
   const candidates = await prisma.lead.findMany({
     where: {
+      ...withWorkspaceFallbackScope(workspaceId),
       OR: [
         websiteUrl ? { websiteUrl: { contains: websiteKey || websiteUrl } } : undefined,
         businessName && location ? { AND: [{ businessName: { equals: businessName } }, { location }] } : undefined,
@@ -90,9 +95,11 @@ async function processRow(row: CsvRow, index: number) {
     location,
     websiteUrl,
     notes,
+    workspaceId,
   });
   await prisma.lead.create({
     data: {
+      workspaceId,
       businessName: businessName || websiteUrl,
       ownerName: ownerName || null,
       category: category || null,
@@ -108,8 +115,15 @@ async function processRow(row: CsvRow, index: number) {
       painSummary: audit.assets.painPointSummary,
       auditJson: JSON.stringify({ checks: audit.checks, websiteSignals: audit.websiteSignals, warnings: audit.warnings, source: audit.source }, null, 2),
       assetsJson: JSON.stringify(audit.assets, null, 2),
+      intelligenceJson: JSON.stringify(audit.intelligence, null, 2),
+      generatedContextJson: audit.generatedContext ? JSON.stringify(audit.generatedContext, null, 2) : null,
     },
   });
+  await incrementUsageMetric({ workspaceId, metric: "audits_generated", amount: 1, metadata: { source: "csv_import_async" } });
+  await incrementUsageMetric({ workspaceId, metric: "proposal_generations", amount: 1, metadata: { source: "csv_import_async" } });
+  await incrementUsageMetric({ workspaceId, metric: "outreach_generations", amount: 1, metadata: { source: "csv_import_async" } });
+  await incrementUsageMetric({ workspaceId, metric: "imported_leads", amount: 1, metadata: { source: "csv_import_async" } });
+  await incrementUsageMetric({ workspaceId, metric: "active_leads", amount: 1, metadata: { source: "csv_import_async" } });
 
   return { kind: "imported" as const };
 }
@@ -121,6 +135,7 @@ async function generateAuditWithRetry(input: {
   location?: string;
   websiteUrl?: string;
   notes?: string;
+  workspaceId?: string;
 }) {
   let lastError: unknown;
   for (let attempt = 0; attempt < 3; attempt += 1) {
@@ -144,9 +159,52 @@ function parsePayload(payloadJson: string) {
   return parsed.filter((row): row is CsvRow => Boolean(row) && typeof row === "object");
 }
 
-export async function processImportJobChunk(jobId: string, chunkSize = DEFAULT_CHUNK_SIZE) {
+function summarizeImportErrors(errors: string[]) {
+  const unique = [...new Set(errors.filter(Boolean).map((entry) => entry.trim()))];
+  return unique.slice(0, 3).join(" ");
+}
+
+export async function processImportJobChunk(jobId: string, chunkSize = DEFAULT_CHUNK_SIZE, workspaceIdInput?: string) {
   const job = await prisma.importJob.findUnique({ where: { id: jobId } });
   if (!job) return null;
+  const workspaceId = workspaceIdInput ?? job.workspaceId ?? (await getWorkspaceContext()).workspaceId;
+  const workspaceState = await ensureWorkspaceOperational(workspaceId);
+  if (!workspaceState.ok) {
+    return prisma.importJob.update({
+      where: { id: job.id },
+      data: {
+        status: "Failed",
+        errorSummary: workspaceState.reason || "Workspace is not operational for imports.",
+        completedAt: new Date(),
+      },
+    });
+  }
+  const importEntitlement = await enforceImportLimit(workspaceId);
+  if (!importEntitlement.allowed) {
+    return prisma.importJob.update({
+      where: { id: job.id },
+      data: {
+        status: "Failed",
+        errorSummary: importEntitlement.reason || "Import limit reached.",
+        completedAt: new Date(),
+      },
+    });
+  }
+  const auditEntitlement = await enforceAuditGeneration(workspaceId);
+  if (!auditEntitlement.allowed) {
+    const remainingRows = Math.max(0, job.totalRows - job.processedRows);
+    return prisma.importJob.update({
+      where: { id: job.id },
+      data: {
+        status: "Completed",
+        skippedRows: job.skippedRows + remainingRows,
+        processedRows: job.totalRows,
+        errorSummary: `Import stopped: ${auditEntitlement.reason || "Audit limit reached."} Skipped ${remainingRows} remaining rows.`,
+        completedAt: new Date(),
+        nextRunAt: null,
+      },
+    });
+  }
   if (job.status === "Completed" || job.status === "Failed") return job;
   if (job.cancelledAt) {
     return prisma.importJob.update({
@@ -176,7 +234,7 @@ export async function processImportJobChunk(jobId: string, chunkSize = DEFAULT_C
 
   for (let index = start; index < end; index += 1) {
     try {
-      const result = await processRow(rows[index] ?? {}, index);
+      const result = await processRow(rows[index] ?? {}, index, workspaceId);
       if (result.kind === "imported") importedRows += 1;
       if (result.kind === "skipped") skippedRows += 1;
       if (result.kind === "failed") {
@@ -199,7 +257,7 @@ export async function processImportJobChunk(jobId: string, chunkSize = DEFAULT_C
       importedRows,
       skippedRows,
       failedRows,
-      errorSummary: errors.filter(Boolean).slice(0, 3).join(" "),
+      errorSummary: summarizeImportErrors(errors),
       completedAt: isDone ? new Date() : null,
       nextRunAt: isDone ? null : new Date(Date.now() + 350),
       lastErrorAt: errors.length ? new Date() : null,
@@ -212,14 +270,19 @@ export async function processImportJobChunk(jobId: string, chunkSize = DEFAULT_C
       importedRows: updated.importedRows,
       skippedRows: updated.skippedRows,
       failedRows: updated.failedRows,
-    });
+    }, undefined, workspaceId);
+    if (updated.importedRows > 0) {
+      await markOnboardingMilestone(workspaceId, "first_import_completed", { importedRows: updated.importedRows });
+    }
   }
   return updated;
 }
 
-export async function cancelImportJob(jobId: string) {
+export async function cancelImportJob(jobId: string, workspaceId?: string) {
+  const job = await prisma.importJob.findFirst({ where: workspaceId ? { id: jobId, ...withWorkspaceFallbackScope(workspaceId) } : { id: jobId } });
+  if (!job) return null;
   return prisma.importJob.update({
-    where: { id: jobId },
+    where: { id: job.id },
     data: {
       cancelledAt: new Date(),
       status: "Cancelled",
@@ -228,15 +291,15 @@ export async function cancelImportJob(jobId: string) {
   });
 }
 
-export async function retryImportJob(jobId: string) {
-  const job = await prisma.importJob.findUnique({ where: { id: jobId } });
+export async function retryImportJob(jobId: string, workspaceId?: string) {
+  const job = await prisma.importJob.findFirst({ where: workspaceId ? { id: jobId, ...withWorkspaceFallbackScope(workspaceId) } : { id: jobId } });
   if (!job) return null;
   if (job.attempts >= job.maxAttempts) {
     logger.warn("import_job_retry_limit_reached", { jobId, attempts: job.attempts, maxAttempts: job.maxAttempts });
     return job;
   }
   return prisma.importJob.update({
-    where: { id: jobId },
+    where: { id: job.id },
     data: {
       status: "Queued",
       nextRunAt: new Date(),
@@ -246,8 +309,9 @@ export async function retryImportJob(jobId: string) {
   });
 }
 
-export async function listRecentImportJobs(limit = 10) {
+export async function listRecentImportJobs(limit = 10, workspaceId?: string) {
   return prisma.importJob.findMany({
+    where: workspaceId ? withWorkspaceFallbackScope(workspaceId) : undefined,
     orderBy: { createdAt: "desc" },
     take: Math.max(1, Math.min(limit, 50)),
   });

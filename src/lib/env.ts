@@ -6,6 +6,7 @@ const envSchema = z.object({
   APP_URL: z.string().url().optional(),
   NEXT_PUBLIC_APP_URL: z.string().url().optional(),
   NEXT_PUBLIC_CALENDLY_URL: z.string().url().optional(),
+  BETTER_AUTH_SECRET: z.string().optional(),
 
   ANTHROPIC_API_KEY: z.string().optional(),
   ANTHROPIC_MODEL: z.string().optional(),
@@ -14,7 +15,9 @@ const envSchema = z.object({
 
   APP_AUTH_ENABLED: z.enum(["true", "false"]).optional(),
   SESSION_SECRET: z.string().optional(),
+  AUTH_OWNER_PASSWORD: z.string().optional(),
   AUTH_ADMIN_PASSWORD: z.string().optional(),
+  AUTH_MEMBER_PASSWORD: z.string().optional(),
   AUTH_SALES_PASSWORD: z.string().optional(),
   AUTH_VIEWER_PASSWORD: z.string().optional(),
 
@@ -23,12 +26,31 @@ const envSchema = z.object({
 
   STRIPE_SECRET_KEY: z.string().optional(),
   STRIPE_WEBHOOK_SECRET: z.string().optional(),
+  STRIPE_SAAS_PRICE_STARTER: z.string().optional(),
+  STRIPE_SAAS_PRICE_GROWTH: z.string().optional(),
+  STRIPE_SAAS_PRICE_AGENCY: z.string().optional(),
+  STRIPE_SAAS_PRICE_ENTERPRISE: z.string().optional(),
+  STRIPE_SAAS_TRIAL_DAYS: z.string().optional(),
+  RESEND_API_KEY: z.string().optional(),
+  RESEND_FROM_EMAIL: z.string().optional(),
+  POSTMARK_API_KEY: z.string().optional(),
+  POSTMARK_FROM_EMAIL: z.string().optional(),
+  TWILIO_ACCOUNT_SID: z.string().optional(),
+  TWILIO_AUTH_TOKEN: z.string().optional(),
+  TWILIO_FROM_PHONE: z.string().optional(),
+  AUTOMATION_RUNNER_SECRET: z.string().optional(),
 
   CRM_WEBHOOK_URL: z.string().url().optional(),
   CRM_WEBHOOK_SECRET: z.string().optional(),
 
   PUBLIC_INGEST_API_KEY: z.string().optional(),
   PUBLIC_INGEST_API_SECRET: z.string().optional(),
+  DEFAULT_WORKSPACE_SLUG: z.string().optional(),
+  DEFAULT_WORKSPACE_NAME: z.string().optional(),
+  ADMIN_EMAILS: z.string().optional(),
+  SENTRY_DSN: z.string().optional(),
+  NEXT_PUBLIC_POSTHOG_KEY: z.string().optional(),
+  NEXT_PUBLIC_POSTHOG_HOST: z.string().optional(),
 });
 
 type ParsedEnv = z.infer<typeof envSchema>;
@@ -61,9 +83,39 @@ export function assertProductionEnv() {
     SESSION_SECRET: env.SESSION_SECRET,
     AUDIT_LINK_SECRET: env.AUDIT_LINK_SECRET,
   });
+  if (env.APP_AUTH_ENABLED === "true") {
+    z.object({
+      BETTER_AUTH_SECRET: z.string().min(24),
+    }).parse({
+      BETTER_AUTH_SECRET: env.BETTER_AUTH_SECRET,
+    });
+  }
+
+  if (env.STRIPE_SECRET_KEY) {
+    z.object({
+      STRIPE_WEBHOOK_SECRET: z.string().min(8),
+    }).parse({
+      STRIPE_WEBHOOK_SECRET: env.STRIPE_WEBHOOK_SECRET,
+    });
+  }
+
+  if (env.RESEND_API_KEY) {
+    z.object({ RESEND_FROM_EMAIL: z.string().email() }).parse({ RESEND_FROM_EMAIL: env.RESEND_FROM_EMAIL });
+  }
+  if (env.POSTMARK_API_KEY) {
+    z.object({ POSTMARK_FROM_EMAIL: z.string().email() }).parse({ POSTMARK_FROM_EMAIL: env.POSTMARK_FROM_EMAIL });
+  }
 }
 
 export function getAppOrigin() {
   const env = getEnv();
   return env.NEXT_PUBLIC_APP_URL || env.APP_URL || "";
+}
+
+export function getAdminEmails() {
+  const env = getEnv();
+  return (env.ADMIN_EMAILS || "")
+    .split(",")
+    .map((value) => value.trim().toLowerCase())
+    .filter(Boolean);
 }

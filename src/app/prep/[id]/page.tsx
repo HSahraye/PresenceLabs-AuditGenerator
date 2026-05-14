@@ -5,9 +5,16 @@ import { prisma } from "@/lib/prisma";
 import { estimatedDealValue, formatMoney } from "@/lib/money";
 import type { AuditChecks, GeneratedAssets } from "@/lib/types";
 import { MeetingPrepCopyButtons } from "@/components/meeting-prep-copy-buttons";
+import { startLeadSequenceAction } from "@/app/actions/automation";
+import { resolvePublicSenderName } from "@/lib/branding";
 import { generateObjectionResponses } from "@/lib/objections";
+import { generateFollowupRecommendation } from "@/lib/intelligence/followup/brain";
+import { buildProposalIntelligence } from "@/lib/intelligence/proposals/engine";
+import { getLeadIntelligence, getPrimaryPainPoints, getRecommendedOffer } from "@/lib/intelligence/selectors";
+import { resolveTemplate } from "@/lib/templates";
 import { requireRole } from "@/lib/auth";
 import { buildSignedAuditPath } from "@/lib/audit-links";
+import { getWorkspaceContext, withWorkspaceFallbackScope } from "@/lib/workspace";
 
 export const dynamic = "force-dynamic";
 
@@ -27,16 +34,80 @@ const auditLabels: Array<[keyof AuditChecks, string]> = [
 
 export default async function MeetingPrepPage({ params }: { params: Promise<{ id: string }> }) {
   await requireRole(["admin", "sales", "viewer"]);
+  const { workspaceId } = await getWorkspaceContext();
   const { id } = await params;
-  const lead = await prisma.lead.findUnique({ where: { id }, include: { attachedCaseStudy: true } });
+  const lead = await prisma.lead.findFirst({
+    where: { id, ...withWorkspaceFallbackScope(workspaceId) },
+    include: {
+      attachedCaseStudy: true,
+      viewLogs: { orderBy: { createdAt: "desc" }, take: 20 },
+      paymentLogs: { orderBy: { createdAt: "desc" }, take: 20 },
+      outreachLogs: { orderBy: { createdAt: "desc" }, take: 20 },
+      sequenceStates: {
+        where: { workspaceId },
+        include: {
+          sequence: { include: { steps: { orderBy: { stepOrder: "asc" } } } },
+          outboundMessages: { orderBy: { createdAt: "desc" }, take: 1 },
+        },
+        orderBy: { updatedAt: "desc" },
+      },
+    },
+  });
   if (!lead) notFound();
+  const brandingWorkspaceId = lead.workspaceId || workspaceId;
+  const workspaceSettings = await prisma.workspaceSettings.findUnique({ where: { workspaceId: brandingWorkspaceId } });
+  const senderCompanyName = resolvePublicSenderName(
+    {
+      publicCompanyName: workspaceSettings?.brandName || null,
+      brandName: workspaceSettings?.brandName || null,
+    },
+  );
 
   const assets = JSON.parse(lead.assetsJson) as GeneratedAssets;
   const audit = JSON.parse(lead.auditJson) as { checks: AuditChecks; websiteSignals: string[]; warnings: string[]; source: string };
+  const intelligence = getLeadIntelligence(lead);
   const price = estimatedDealValue(lead.packageName, lead.customPrice);
-  const failedChecks = auditLabels.filter(([key]) => !audit.checks[key]);
+  const [outreachTemplate, offerTemplate] = await Promise.all([
+    resolveTemplate(workspaceId, "outreach", lead.category),
+    resolveTemplate(workspaceId, "offer", lead.category),
+  ]);
+  const failedChecks = auditLabels.filter(([key]) => !audit.checks[key]).length
+    ? auditLabels.filter(([key]) => !audit.checks[key])
+    : getPrimaryPainPoints(lead).map((pain) => ["hasWebsite", pain] as [keyof AuditChecks, string]);
   const objections = generateObjectionResponses(lead.businessName, assets, lead.packageName);
+  const followup = generateFollowupRecommendation({
+    intelligence,
+    engagement: {
+      viewCount: lead.viewLogs.length,
+      revisitCount: Math.max(0, lead.viewLogs.length - 1),
+      paymentClickCount: lead.paymentLogs.length,
+      outreachRecencyHours: lead.lastContactedAt ? 24 : 999,
+    },
+  });
+  const proposalIntel = buildProposalIntelligence({
+    businessName: lead.businessName,
+    category: lead.category,
+    packageName: getRecommendedOffer(lead),
+    customPrice: lead.customPrice,
+    intelligence,
+    template: {
+      proposalStyle: offerTemplate.config.proposalStyle,
+      guaranteeStyle: offerTemplate.config.guaranteeStyle,
+      urgencyStyle: offerTemplate.config.urgencyStyle,
+      sectionOrder: offerTemplate.config.sectionOrder,
+    },
+  });
   const auditPath = buildSignedAuditPath(lead.id);
+  const availableSequences = await prisma.sequence.findMany({
+    where: { workspaceId, status: "active" },
+    select: { id: true, name: true },
+    orderBy: { updatedAt: "desc" },
+    take: 100,
+  });
+  async function enrollLeadAction(formData: FormData) {
+    "use server";
+    await startLeadSequenceAction(formData);
+  }
 
   const confirmationEmail = `Subject: Quick follow-up — ${lead.businessName} presence audit
 
@@ -56,7 +127,7 @@ I'll follow up shortly to answer any questions and walk you through next steps.
 
 Best,
 Hamid
-Presence Labs`;
+${senderCompanyName}`;
 
   return (
     <main className="min-h-screen bg-[#f5f7f2] text-slate-950">
@@ -176,6 +247,72 @@ Presence Labs`;
           <h2 className="font-black">What They Get</h2>
           <p className="mt-3 text-sm leading-relaxed text-slate-700">{assets.presenceLabsOffer}</p>
           <p className="mt-3 text-xs text-slate-500 italic">{assets.likelyMoneyLost}</p>
+        </div>
+
+        <div className="rounded-[2rem] border border-slate-200 bg-white p-6 shadow-sm">
+          <h2 className="font-black">Follow-up Brain</h2>
+          <p className="mt-2 text-sm text-slate-700">
+            Next step: {followup.recommendedNextStep} ({followup.recommendedChannel}, {followup.suggestedTiming})
+          </p>
+          <p className="mt-2 text-xs font-bold uppercase tracking-[0.14em] text-slate-500">
+            Urgency: {followup.urgencyLevel} · Style: {outreachTemplate.config.outreachStyle}
+          </p>
+        </div>
+
+        <div className="rounded-[2rem] border border-slate-200 bg-white p-6 shadow-sm">
+          <h2 className="font-black">Proposal Intelligence</h2>
+          <p className="mt-2 text-sm text-slate-700">{proposalIntel.roiFraming}</p>
+          <p className="mt-2 text-sm font-bold text-lime-700">
+            Pricing recommendation: {formatMoney(proposalIntel.pricingRecommendation)}
+          </p>
+          <p className="mt-1 text-xs font-bold uppercase tracking-[0.12em] text-slate-500">
+            Proposal style: {offerTemplate.config.proposalStyle} · Guarantee: {offerTemplate.config.guaranteeStyle}
+          </p>
+          <p className="mt-1 text-xs text-slate-500">Guarantee framing: {proposalIntel.guaranteeFraming}</p>
+          <ul className="mt-3 list-disc space-y-1 pl-5 text-sm text-slate-700">
+            {proposalIntel.scopeRecommendations.map((item) => (
+              <li key={item}>{item}</li>
+            ))}
+          </ul>
+        </div>
+
+        <div className="rounded-[2rem] border border-slate-200 bg-white p-6 shadow-sm">
+          <h2 className="font-black">Sequence State Visibility</h2>
+          <div className="mt-3 grid gap-2">
+            {!lead.sequenceStates.length ? <p className="rounded-xl bg-slate-50 p-3 text-sm text-slate-500">No active sequence enrollment for this lead.</p> : null}
+            {lead.sequenceStates.map((state) => {
+              const currentStep = state.sequence.steps[state.currentStep];
+              const lastMessage = state.outboundMessages[0];
+              return (
+                <div key={state.id} className="rounded-xl border border-slate-200 bg-slate-50 p-3">
+                  <div className="flex flex-wrap items-center justify-between gap-2">
+                    <p className="font-black text-slate-900">{state.sequence.name}</p>
+                    <p className="text-xs font-black uppercase tracking-[0.12em] text-slate-500">{state.status}</p>
+                  </div>
+                  <p className="mt-1 text-xs text-slate-600">
+                    Current step: {currentStep ? `${currentStep.stepOrder + 1}. ${currentStep.name}` : "completed"} · Next action: {state.nextRunAt ? new Date(state.nextRunAt).toLocaleString() : "none"}
+                  </p>
+                  <p className="mt-1 text-xs text-slate-600">
+                    Last executed: {lastMessage ? `${lastMessage.channel} (${lastMessage.status})` : "n/a"} · Retries: {lastMessage?.retryCount ?? 0}
+                  </p>
+                  {state.lastError ? <p className="mt-1 text-xs font-bold text-rose-700">Failure: {state.lastError}</p> : null}
+                </div>
+              );
+            })}
+          </div>
+          <form action={enrollLeadAction} className="mt-4 grid gap-2 md:grid-cols-[1fr_220px_auto]">
+            <input type="hidden" name="leadId" value={lead.id} />
+            <select name="sequenceId" required className="h-10 rounded-xl border border-slate-200 bg-white px-3 text-sm font-semibold">
+              <option value="">Add to active sequence...</option>
+              {availableSequences.map((sequence) => (
+                <option key={sequence.id} value={sequence.id}>
+                  {sequence.name}
+                </option>
+              ))}
+            </select>
+            <input name="scheduledStartAt" type="datetime-local" className="h-10 rounded-xl border border-slate-200 bg-white px-3 text-sm font-semibold" />
+            <button className="h-10 rounded-xl bg-lime-300 px-4 text-xs font-black text-slate-950 hover:bg-lime-200">Enroll Lead</button>
+          </form>
         </div>
 
         {/* Case study */}

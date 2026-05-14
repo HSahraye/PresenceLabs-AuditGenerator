@@ -2,11 +2,13 @@ import { prisma } from "@/lib/prisma";
 import { CallTodayDashboard } from "@/components/call-today-dashboard";
 import { requireRole } from "@/lib/auth";
 import { buildSignedAuditPath } from "@/lib/audit-links";
+import { getWorkspaceContext, withWorkspaceFallbackScope } from "@/lib/workspace";
 
 export const dynamic = "force-dynamic";
 
 export default async function CallTodayPage() {
   await requireRole(["admin", "sales", "viewer"]);
+  const { workspaceId } = await getWorkspaceContext();
   const now = new Date();
   // End of today (23:59:59) so we include everything due today
   const endOfToday = new Date(now.getFullYear(), now.getMonth(), now.getDate(), 23, 59, 59);
@@ -15,6 +17,7 @@ export default async function CallTodayPage() {
 
   const leads = await prisma.lead.findMany({
     where: {
+      ...withWorkspaceFallbackScope(workspaceId),
       status: { notIn: ["Won", "Lost"] },
       OR: [
         // Follow-up due today or overdue
@@ -50,6 +53,7 @@ export default async function CallTodayPage() {
       customPrice: true,
       painSummary: true,
       assetsJson: true,
+      intelligenceJson: true,
       nextFollowUpAt: true,
       lastContactedAt: true,
     },
@@ -58,6 +62,7 @@ export default async function CallTodayPage() {
   const serialized = leads.map((l) => ({
     ...l,
     publicAuditPath: buildSignedAuditPath(l.id),
+    intelligenceJson: l.intelligenceJson ?? null,
     nextFollowUpAt: l.nextFollowUpAt ? l.nextFollowUpAt.toISOString() : null,
     lastContactedAt: l.lastContactedAt ? l.lastContactedAt.toISOString() : null,
   }));

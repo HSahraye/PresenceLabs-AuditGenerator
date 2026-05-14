@@ -1,10 +1,12 @@
 import { NextResponse } from "next/server";
 import { z } from "zod";
+import { enforceImportLimit, ensureWorkspaceOperational } from "@/lib/billing/entitlements";
 import { prisma } from "@/lib/prisma";
 import { getEnv } from "@/lib/env";
 import { enforceRateLimit, verifyHmacSignature } from "@/lib/request-security";
 import { trackEvent } from "@/lib/events";
 import { processImportJobChunk } from "@/lib/import-jobs";
+import { getWorkspaceContext } from "@/lib/workspace";
 
 const schema = z.object({
   businessName: z.string().min(1),
@@ -65,8 +67,18 @@ export async function POST(request: Request) {
     return NextResponse.json({ ok: false, error: parsed.error.issues[0]?.message ?? "Invalid lead payload." }, { status: 400, headers: corsHeaders(origin) });
   }
 
+  const { workspaceId } = await getWorkspaceContext();
+  const workspaceState = await ensureWorkspaceOperational(workspaceId);
+  if (!workspaceState.ok) {
+    return NextResponse.json({ ok: false, error: workspaceState.reason }, { status: 402, headers: corsHeaders(origin) });
+  }
+  const importEntitlement = await enforceImportLimit(workspaceId);
+  if (!importEntitlement.allowed) {
+    return NextResponse.json({ ok: false, error: importEntitlement.reason || "Import limit reached." }, { status: 402, headers: corsHeaders(origin) });
+  }
   const importJob = await prisma.importJob.create({
     data: {
+      workspaceId,
       status: "Queued",
       mode: "public-ingest",
       totalRows: 1,
@@ -87,13 +99,13 @@ export async function POST(request: Request) {
   });
   void (async () => {
     for (let tick = 0; tick < 10; tick += 1) {
-      const current = await processImportJobChunk(importJob.id);
+      const current = await processImportJobChunk(importJob.id, undefined, workspaceId);
       if (!current) break;
       if (["Completed", "Failed", "Cancelled"].includes(current.status)) break;
     }
   })();
 
-  await trackEvent("public_lead_ingested", { importJobId: importJob.id, source: parsed.data.source ?? "presencelabs.net" });
+  await trackEvent("public_lead_ingested", { importJobId: importJob.id, source: parsed.data.source ?? "presencelabs.net" }, undefined, workspaceId);
 
   return NextResponse.json(
     {

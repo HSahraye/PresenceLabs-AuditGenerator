@@ -1,0 +1,1 @@
+export { generateIntelligenceNarrative } from "./generate";

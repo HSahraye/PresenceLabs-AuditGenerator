@@ -1,0 +1,1 @@
+export { resolveTemplate } from "./resolver";

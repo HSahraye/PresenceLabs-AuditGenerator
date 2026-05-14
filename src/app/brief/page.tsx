@@ -1,8 +1,11 @@
 import Link from "next/link";
 import { ArrowRight, Phone, Ghost, Eye, Clock, Target, TrendingUp } from "lucide-react";
+import { BRAND } from "@/lib/brand";
 import { prisma } from "@/lib/prisma";
 import { estimatedDealValue, formatMoney, weightedDealValue } from "@/lib/money";
 import { requireRole } from "@/lib/auth";
+import { getCloseProbability, getLeadPriorityState } from "@/lib/intelligence/selectors";
+import { getWorkspaceContext, withWorkspaceFallbackScope } from "@/lib/workspace";
 
 export const dynamic = "force-dynamic";
 
@@ -15,6 +18,7 @@ function greeting() {
 
 export default async function BriefPage() {
   await requireRole(["admin", "sales", "viewer"]);
+  const { workspaceId } = await getWorkspaceContext();
   const now = new Date();
   const endOfToday = new Date(now.getFullYear(), now.getMonth(), now.getDate(), 23, 59, 59);
   const threeDaysAgo = new Date(now.getTime() - 3 * 24 * 60 * 60 * 1000);
@@ -34,6 +38,7 @@ export default async function BriefPage() {
     // Calls due today
     prisma.lead.count({
       where: {
+        ...withWorkspaceFallbackScope(workspaceId),
         status: { notIn: ["Won", "Lost"] },
         OR: [
           { nextFollowUpAt: { lte: endOfToday } },
@@ -45,6 +50,7 @@ export default async function BriefPage() {
     // Ghost leads
     prisma.lead.count({
       where: {
+        ...withWorkspaceFallbackScope(workspaceId),
         status: { in: ["Contacted", "Follow-up"] },
         lastContactedAt: { lte: threeDaysAgo },
       },
@@ -52,6 +58,7 @@ export default async function BriefPage() {
     // Warm: viewed audit in last 24h
     prisma.lead.count({
       where: {
+        ...withWorkspaceFallbackScope(workspaceId),
         status: { notIn: ["Won", "Lost"] },
         viewLogs: { some: { createdAt: { gte: oneDayAgo } } },
       },
@@ -59,6 +66,7 @@ export default async function BriefPage() {
     // Awaiting: shared but viewed recently (48h)
     prisma.lead.count({
       where: {
+        ...withWorkspaceFallbackScope(workspaceId),
         status: { notIn: ["Won", "Lost"] },
         outreachLogs: { some: { type: { in: ["Share", "Email"] } } },
         viewLogs: { some: { createdAt: { gte: twoDaysAgo } } },
@@ -66,25 +74,26 @@ export default async function BriefPage() {
     }),
     // Won this month
     prisma.lead.findMany({
-      where: { status: "Won", updatedAt: { gte: startOfMonth } },
+      where: { ...withWorkspaceFallbackScope(workspaceId), status: "Won", updatedAt: { gte: startOfMonth } },
       select: { packageName: true, customPrice: true },
     }),
     // Active pipeline
     prisma.lead.findMany({
-      where: { status: { notIn: ["Won", "Lost"] } },
+      where: { ...withWorkspaceFallbackScope(workspaceId), status: { notIn: ["Won", "Lost"] } },
       select: { status: true, score: true, packageName: true, customPrice: true },
       orderBy: { score: "desc" },
       take: 5,
     }),
     // Top leads for the hit list
     prisma.lead.findMany({
-      where: { status: { notIn: ["Won", "Lost"] } },
+      where: { ...withWorkspaceFallbackScope(workspaceId), status: { notIn: ["Won", "Lost"] } },
       select: {
         id: true,
         businessName: true,
         score: true,
         packageName: true,
         customPrice: true,
+        intelligenceJson: true,
         phone: true,
         nextFollowUpAt: true,
         lastContactedAt: true,
@@ -111,6 +120,7 @@ export default async function BriefPage() {
         else if (ago < 72 * 3600_000) s += 15;
       }
       if (lead.paymentLogs.length) s += 20;
+      s += Math.round(getCloseProbability(lead) * 0.35);
       if (lead.nextFollowUpAt && lead.nextFollowUpAt <= endOfToday) s += 15;
       if (lead.phone) s += 5;
       return { ...lead, closePriority: s };
@@ -134,12 +144,12 @@ export default async function BriefPage() {
         {/* Header */}
         <div className="flex items-end justify-between gap-4">
           <div>
-            <p className="text-xs font-black uppercase tracking-[0.22em] text-lime-700">Presence Labs</p>
+            <p className="text-xs font-black uppercase tracking-[0.22em] text-lime-700">{BRAND.productName}</p>
             <h1 className="mt-1 text-2xl font-black">{greeting()}, Hamid 🦾</h1>
             <p className="mt-0.5 text-sm text-slate-500">{dateStr}</p>
           </div>
           <Link href="/" className="inline-flex h-9 items-center gap-2 rounded-xl border border-slate-200 bg-white px-3 text-xs font-black text-slate-700 transition hover:bg-slate-50">
-            Full Dashboard
+            Back to Home
           </Link>
         </div>
 
@@ -202,6 +212,7 @@ export default async function BriefPage() {
                         {viewedRecently ? " · 👁️ viewed" : ""}
                         {lead.paymentLogs.length ? " · 💳 clicked" : ""}
                         {dueToday ? " · 📅 due" : ""}
+                        {` · ${getLeadPriorityState(lead)}`}
                       </p>
                     </div>
                     <div className="flex gap-1.5 shrink-0">

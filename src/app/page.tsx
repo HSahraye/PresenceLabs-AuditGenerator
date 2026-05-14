@@ -1,56 +1,88 @@
 import { AuditDashboard } from "@/components/audit-dashboard";
-import { requireRole } from "@/lib/auth";
+import { listCurrentUserWorkspaces, requireSessionRole } from "@/lib/auth";
 import { buildSignedAuditPath } from "@/lib/audit-links";
+import { resolvePublicSenderName } from "@/lib/branding";
 import { prisma } from "@/lib/prisma";
+import { getPublicBaseUrl } from "@/lib/url";
+import { withWorkspaceFallbackScope } from "@/lib/workspace";
 
 export const dynamic = "force-dynamic";
 
 export default async function Home() {
-  await requireRole(["admin", "sales", "viewer"]);
+  const session = await requireSessionRole(["owner", "admin", "member", "sales", "viewer"]);
+  const workspaceId = session.workspaceId;
+  const publicBaseUrl = getPublicBaseUrl();
+  const workspaceOptions = await listCurrentUserWorkspaces();
   const startOfToday = new Date();
   startOfToday.setHours(0, 0, 0, 0);
   const last24Hours = new Date();
   last24Hours.setHours(last24Hours.getHours() - 24);
 
   const leads = await prisma.lead.findMany({
+    where: withWorkspaceFallbackScope(workspaceId),
     orderBy: [{ score: "desc" }, { createdAt: "desc" }],
     include: {
       outreachLogs: { orderBy: { createdAt: "desc" }, take: 10 },
       viewLogs: { orderBy: { createdAt: "desc" }, take: 1 },
       attachedCaseStudy: true,
       paymentLogs: { orderBy: { createdAt: "desc" }, take: 1 },
+      sequenceStates: {
+        where: { status: { in: ["active", "paused"] } },
+        include: {
+          sequence: { select: { id: true, name: true } },
+          outboundMessages: { orderBy: { createdAt: "desc" }, take: 1, select: { status: true, retryCount: true, createdAt: true } },
+        },
+        take: 5,
+      },
     },
   });
 
   const viewCounts = await prisma.viewLog.groupBy({
     by: ["leadId"],
+    where: withWorkspaceFallbackScope(workspaceId),
     _count: { leadId: true },
   });
   const todayOutreach = await prisma.outreachLog.groupBy({
     by: ["type"],
-    where: { createdAt: { gte: startOfToday } },
+    where: { ...withWorkspaceFallbackScope(workspaceId), createdAt: { gte: startOfToday } },
     _count: { type: true },
   });
   const viewCountByLead = new Map(viewCounts.map((item) => [item.leadId, item._count.leadId]));
   const paymentCounts = await prisma.paymentLog.groupBy({
     by: ["leadId"],
+    where: withWorkspaceFallbackScope(workspaceId),
     _count: { leadId: true },
   });
   const paymentCountByLead = new Map(paymentCounts.map((item) => [item.leadId, item._count.leadId]));
-  const caseStudies = await prisma.caseStudy.findMany({ orderBy: [{ updatedAt: "desc" }] });
+  const caseStudies = await prisma.caseStudy.findMany({ where: withWorkspaceFallbackScope(workspaceId), orderBy: [{ updatedAt: "desc" }] });
   const latestImportJob = await prisma.importJob.findFirst({
-    where: { status: { in: ["Queued", "Running"] } },
+    where: { ...withWorkspaceFallbackScope(workspaceId), status: { in: ["Queued", "Running"] } },
     orderBy: { createdAt: "desc" },
   });
   const recentImportJobs = await prisma.importJob.findMany({
+    where: withWorkspaceFallbackScope(workspaceId),
     orderBy: { createdAt: "desc" },
     take: 8,
   });
   const [queueDepth, failedJobsCount, eventsLast24h] = await Promise.all([
-    prisma.importJob.count({ where: { status: { in: ["Queued", "Running"] } } }),
-    prisma.importJob.count({ where: { status: "Failed" } }),
-    prisma.eventLog.count({ where: { createdAt: { gte: last24Hours } } }),
+    prisma.importJob.count({ where: { ...withWorkspaceFallbackScope(workspaceId), status: { in: ["Queued", "Running"] } } }),
+    prisma.importJob.count({ where: { ...withWorkspaceFallbackScope(workspaceId), status: "Failed" } }),
+    prisma.eventLog.count({ where: { ...withWorkspaceFallbackScope(workspaceId), createdAt: { gte: last24Hours } } }),
   ]);
+  const sequences = await prisma.sequence.findMany({
+    where: { workspaceId },
+    select: { id: true, name: true, status: true },
+    orderBy: { updatedAt: "desc" },
+    take: 100,
+  });
+
+  const workspaceSettings = await prisma.workspaceSettings.findUnique({ where: { workspaceId } });
+  const senderCompanyName = resolvePublicSenderName(
+    {
+      brandName: workspaceSettings?.brandName ?? null,
+      publicCompanyName: workspaceSettings?.brandName ?? null,
+    },
+  );
 
   return (
     <AuditDashboard
@@ -93,6 +125,21 @@ export default async function Home() {
         failedJobsCount,
         eventsLast24h,
       }}
+      activeWorkspaceId={workspaceId}
+      workspaceOptions={workspaceOptions.map((workspace) => ({
+        workspaceId: workspace.workspaceId,
+        workspaceSlug: workspace.workspaceSlug,
+        workspaceName: workspace.workspaceName,
+        role: String(workspace.role),
+      }))}
+      canManageWorkspace={session.role === "owner" || session.role === "admin"}
+      publicBaseUrl={publicBaseUrl}
+      senderCompanyName={senderCompanyName}
+      sequences={sequences.map((sequence) => ({
+        id: sequence.id,
+        name: sequence.name,
+        status: sequence.status,
+      }))}
       caseStudies={caseStudies.map((caseStudy) => ({
         id: caseStudy.id,
         title: caseStudy.title,
@@ -128,6 +175,7 @@ export default async function Home() {
         painSummary: lead.painSummary,
         auditJson: lead.auditJson,
         assetsJson: lead.assetsJson,
+        intelligenceJson: lead.intelligenceJson ?? null,
         nextFollowUpAt: lead.nextFollowUpAt?.toISOString() ?? null,
         lastContactedAt: lead.lastContactedAt?.toISOString() ?? null,
         outreachLogs: lead.outreachLogs.map((log) => ({ id: log.id, type: log.type, notes: log.notes, createdAt: log.createdAt.toISOString() })),
@@ -137,6 +185,18 @@ export default async function Home() {
         lastPaymentClickedAt: lead.paymentLogs[0]?.createdAt.toISOString() ?? null,
         paymentStatus: lead.paymentStatus,
         lastPaymentAt: lead.lastPaymentAt?.toISOString() ?? null,
+        sequenceStates: lead.sequenceStates.map((state) => ({
+          id: state.id,
+          sequenceId: state.sequenceId,
+          sequenceName: state.sequence.name,
+          status: state.status,
+          currentStep: state.currentStep,
+          nextRunAt: state.nextRunAt?.toISOString() ?? null,
+          lastError: state.lastError,
+          lastMessageStatus: state.outboundMessages[0]?.status ?? null,
+          lastMessageRetryCount: state.outboundMessages[0]?.retryCount ?? 0,
+          lastMessageAt: state.outboundMessages[0]?.createdAt.toISOString() ?? null,
+        })),
         createdAt: lead.createdAt.toISOString(),
         updatedAt: lead.updatedAt.toISOString(),
       }))}

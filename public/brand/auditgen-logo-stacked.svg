@@ -1,0 +1,15 @@
+<svg width="260" height="240" viewBox="0 0 260 240" fill="none" xmlns="http://www.w3.org/2000/svg">
+  <g transform="translate(74 10)">
+    <circle cx="56" cy="56" r="48" stroke="#0F172A" stroke-width="8" />
+    <path d="M10 94L34 70" stroke="#0F172A" stroke-width="11" stroke-linecap="round" />
+    <path d="M42 70L70 42" stroke="#10B981" stroke-width="10" stroke-linecap="round" />
+    <path d="M62 42H90V70" stroke="#10B981" stroke-width="10" stroke-linecap="round" stroke-linejoin="round" />
+    <rect x="38" y="42" width="7" height="26" rx="2" fill="#0F172A" />
+    <rect x="48" y="36" width="7" height="32" rx="2" fill="#0F172A" />
+    <rect x="58" y="47" width="7" height="21" rx="2" fill="#0F172A" />
+    <path d="M36 72H74" stroke="#0F172A" stroke-width="4" stroke-linecap="round" />
+  </g>
+  <text x="130" y="158" text-anchor="middle" fill="#0F172A" font-family="Inter, Arial, sans-serif" font-size="42" font-weight="900" letter-spacing="2">AUDITGEN</text>
+  <text x="130" y="188" text-anchor="middle" fill="#64748B" font-family="Inter, Arial, sans-serif" font-size="13" font-weight="700" letter-spacing="1.4">AUTOMATED REPORTING</text>
+  <text x="130" y="206" text-anchor="middle" fill="#64748B" font-family="Inter, Arial, sans-serif" font-size="13" font-weight="700" letter-spacing="1.4">&amp; SECURITY ANALYSIS</text>
+</svg>

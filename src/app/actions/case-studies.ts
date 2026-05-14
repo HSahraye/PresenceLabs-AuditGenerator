@@ -5,6 +5,7 @@ import { z } from "zod";
 import { prisma } from "@/lib/prisma";
 import { requireRole } from "@/lib/auth";
 import { writeAuditLog } from "@/lib/audit-log";
+import { getWorkspaceContext } from "@/lib/workspace";
 
 const caseStudySchema = z.object({
   title: z.string().min(1).max(160),
@@ -16,6 +17,7 @@ const caseStudySchema = z.object({
 
 export async function createCaseStudyAction(_prevState: unknown, formData: FormData) {
   const actorRole = await requireRole(["admin", "sales"]);
+  const { workspaceId } = await getWorkspaceContext();
   const parsed = caseStudySchema.safeParse({
     title: formData.get("title"),
     result: formData.get("result"),
@@ -27,6 +29,7 @@ export async function createCaseStudyAction(_prevState: unknown, formData: FormD
 
   await prisma.caseStudy.create({
     data: {
+      workspaceId,
       title: parsed.data.title,
       result: parsed.data.result,
       description: parsed.data.description,
@@ -36,6 +39,6 @@ export async function createCaseStudyAction(_prevState: unknown, formData: FormD
   });
 
   revalidatePath("/");
-  await writeAuditLog({ action: "case-study.create", actorRole, metadata: { title: parsed.data.title } });
+  await writeAuditLog({ action: "case-study.create", actorRole, metadata: { title: parsed.data.title }, workspaceId });
   return { ok: true, error: "" };
 }

@@ -4,6 +4,9 @@ import Link from "next/link";
 import { useMemo, useState, useTransition } from "react";
 import { ArrowLeft, ExternalLink, Loader2, Mail, MessageSquareText, Phone, SkipForward } from "lucide-react";
 import { logOutreachAction, updateLeadStatusAction } from "@/app/actions/leads";
+import { sanitizePublicBrandCopy } from "@/lib/branding";
+import { buildMailtoHref, buildSmsHref } from "@/lib/communication/links";
+import { getOutreachAngles, getPrimaryPainPoints } from "@/lib/intelligence/selectors";
 import type { GeneratedAssets } from "@/lib/types";
 
 type OutreachLead = {
@@ -20,6 +23,7 @@ type OutreachLead = {
   publicAuditPath: string;
   painSummary: string;
   assetsJson: string;
+  intelligenceJson: string | null;
   nextFollowUpAt: string | null;
   lastContactedAt: string | null;
   viewCount: number;
@@ -36,18 +40,37 @@ function nextFollowUpDate(days = 3) {
   return date.toISOString().slice(0, 10);
 }
 
-export function OutreachView({ leads }: { leads: OutreachLead[] }) {
-  const parsedLeads = useMemo<LeadView[]>(() => leads.map((lead) => ({ ...lead, assets: JSON.parse(lead.assetsJson) })), [leads]);
+export function OutreachView({ leads, publicBaseUrl }: { leads: OutreachLead[]; publicBaseUrl: string }) {
+  const parsedLeads = useMemo<LeadView[]>(
+    () =>
+      leads.map((lead) => {
+        const parsed = JSON.parse(lead.assetsJson) as GeneratedAssets;
+        return {
+          ...lead,
+          assets: {
+            ...parsed,
+            coldCallScript: sanitizePublicBrandCopy(parsed.coldCallScript),
+            textMessageScript: sanitizePublicBrandCopy(parsed.textMessageScript),
+            emailScript: sanitizePublicBrandCopy(parsed.emailScript),
+            thirtySecondPitch: sanitizePublicBrandCopy(parsed.thirtySecondPitch),
+            followUpMessage: sanitizePublicBrandCopy(parsed.followUpMessage),
+          },
+        };
+      }),
+    [leads],
+  );
   const [index, setIndex] = useState(0);
   const [error, setError] = useState("");
   const [doneCount, setDoneCount] = useState(0);
   const [isPending, startTransition] = useTransition();
   const lead = parsedLeads[index];
-  const auditUrl = lead ? `${typeof window !== "undefined" ? window.location.origin : ""}${lead.publicAuditPath}` : "";
-  const smsUrl = lead?.phone ? `sms:${lead.phone}?&body=${encodeURIComponent(`${lead.assets.textMessageScript}\n\nAudit: ${auditUrl}`)}` : "";
-  const emailUrl = lead ? `mailto:${lead.email ?? ""}?subject=${encodeURIComponent(`Quick online presence audit for ${lead.businessName}`)}&body=${encodeURIComponent(`${lead.assets.emailScript}\n\nAudit: ${auditUrl}`)}` : "";
+  const auditUrl = lead ? `${publicBaseUrl}${lead.publicAuditPath}` : "";
+  const smsUrl = lead?.phone ? buildSmsHref(lead.phone, `${lead.assets.textMessageScript}\n\nAudit: ${auditUrl}`) : "";
+  const emailUrl = lead ? buildMailtoHref(`Quick online presence audit for ${lead.businessName}`, `${lead.assets.emailScript}\n\nAudit: ${auditUrl}`) : "";
 
-  const goNext = () => setIndex((current) => Math.min(current + 1, parsedLeads.length));
+  const goNext = () => setIndex((current) => Math.min(current + 1, parsedLeads.length - 1));
+  const goPrev = () => setIndex((current) => Math.max(0, current - 1));
+  const goTo = (target: number) => setIndex(Math.max(0, Math.min(parsedLeads.length - 1, target)));
 
   const logAndNext = (type: "Call" | "SMS" | "Email", notes: string) => {
     if (!lead) return;
@@ -93,6 +116,35 @@ export function OutreachView({ leads }: { leads: OutreachLead[] }) {
         {!lead ? <div className="rounded-[2rem] border border-slate-200 bg-white p-8 text-center shadow-sm"><h2 className="text-3xl font-black">No more call-today leads.</h2><p className="mt-3 text-slate-500">Add leads, generate audits, or set follow-up dates to fill this queue.</p><Link href="/research" className="mt-6 inline-flex rounded-2xl bg-lime-300 px-5 py-3 text-sm font-black text-slate-950">Go to Lead Research Queue</Link></div> : null}
 
         {lead ? <div className="grid gap-5">
+          <div className="rounded-2xl border border-slate-200 bg-white p-3 shadow-sm">
+            <div className="flex flex-wrap items-center gap-2">
+              <button
+                disabled={index === 0 || isPending}
+                onClick={goPrev}
+                className="h-10 rounded-xl border border-slate-200 px-3 text-xs font-black text-slate-700 disabled:opacity-50"
+              >
+                Previous
+              </button>
+              <button
+                disabled={index >= parsedLeads.length - 1 || isPending}
+                onClick={goNext}
+                className="h-10 rounded-xl border border-slate-200 px-3 text-xs font-black text-slate-700 disabled:opacity-50"
+              >
+                Next
+              </button>
+              <label className="ml-auto flex items-center gap-2 text-xs font-black uppercase tracking-[0.12em] text-slate-500">
+                Jump to
+                <input
+                  type="number"
+                  min={1}
+                  max={parsedLeads.length}
+                  value={index + 1}
+                  onChange={(event) => goTo(Number(event.target.value || 1) - 1)}
+                  className="h-10 w-20 rounded-xl border border-slate-200 px-2 text-sm font-black text-slate-900"
+                />
+              </label>
+            </div>
+          </div>
           <div className="rounded-[2rem] bg-slate-950 p-6 text-white shadow-sm">
             <div className="flex flex-col gap-4 md:flex-row md:items-start md:justify-between">
               <div>
@@ -100,7 +152,14 @@ export function OutreachView({ leads }: { leads: OutreachLead[] }) {
                 <h2 className="mt-2 text-4xl font-black">{lead.businessName}</h2>
                 <p className="mt-3 text-white/60">{lead.ownerName ? `${lead.ownerName} • ` : ""}{lead.category || "Local business"} • {lead.location || "Bay Area"} • Score {lead.score}</p>
                 <p className="mt-3 flex flex-wrap gap-2 text-xs font-black uppercase tracking-[0.14em]"><span className="rounded-full bg-white/10 px-3 py-1 text-white/70">Views {lead.viewCount}</span><span className="rounded-full bg-white/10 px-3 py-1 text-white/70">Payment clicks {lead.paymentClickCount}</span>{lead.lastPaymentClickedAt ? <span className="rounded-full bg-rose-500 px-3 py-1 text-white">Clicked payment {new Date(lead.lastPaymentClickedAt).toLocaleDateString()}</span> : null}{!lead.lastPaymentClickedAt && lead.lastViewedAt ? <span className="rounded-full bg-lime-300 px-3 py-1 text-slate-950">Viewed {new Date(lead.lastViewedAt).toLocaleDateString()}</span> : null}</p>
-                <p className="mt-4 max-w-3xl text-sm leading-6 text-white/70">{lead.painSummary}</p>
+                <p className="mt-4 max-w-3xl text-sm leading-6 text-white/70">
+                  {getPrimaryPainPoints(lead)[0] || lead.painSummary}
+                </p>
+                {getOutreachAngles(lead).length > 0 ? (
+                  <p className="mt-2 text-xs font-bold uppercase tracking-[0.12em] text-lime-300">
+                    Angle: {getOutreachAngles(lead)[0]}
+                  </p>
+                ) : null}
               </div>
               <div className="rounded-3xl bg-lime-300 px-6 py-5 text-center text-slate-950"><p className="text-4xl font-black">{lead.score}</p><p className="text-xs font-black uppercase tracking-[0.18em]">Lead score</p></div>
             </div>

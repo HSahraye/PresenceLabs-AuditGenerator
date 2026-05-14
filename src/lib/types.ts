@@ -1,3 +1,6 @@
+import type { LeadIntelligence } from "@/lib/intelligence/types";
+import type { ResolvedTemplate } from "@/lib/templates";
+
 export type AuditInput = {
   businessName: string;
   ownerName?: string;
@@ -6,6 +9,7 @@ export type AuditInput = {
   websiteUrl?: string;
   googleProfileUrl?: string;
   notes?: string;
+  workspaceId?: string;
 };
 
 export type AuditChecks = {
@@ -41,7 +45,46 @@ export type GeneratedAssets = {
 export type AuditResult = {
   checks: AuditChecks;
   assets: GeneratedAssets;
+  intelligence: LeadIntelligence;
   websiteSignals: string[];
   warnings: string[];
-  source: "claude" | "gemini" | "local-fallback";
+  source: "claude" | "gemini" | "local-fallback" | "intelligence-gemini" | "intelligence-local";
+  generatedContext?: GenerationContextSnapshot;
+};
+
+export type GenerationContextSnapshot = {
+  generationVersion: string;
+  workspaceId: string | null;
+  workspaceName: string | null;
+  branding: {
+    brandName: string;
+    logoUrl: string | null;
+    primaryColor: string | null;
+    accentColor: string | null;
+    typography: string | null;
+    senderIdentity: string | null;
+    footerContent: string | null;
+    ctaLabelPrimary: string | null;
+    ctaLabelSecondary: string | null;
+    auditIntroCopy: string | null;
+    auditOutroCopy: string | null;
+  };
+  templates: {
+    audit: Pick<ResolvedTemplate, "id" | "name" | "source" | "version" | "category">;
+    outreach: Pick<ResolvedTemplate, "id" | "name" | "source" | "version" | "category">;
+    offer: Pick<ResolvedTemplate, "id" | "name" | "source" | "version" | "category">;
+  };
+  templateSnapshot: {
+    audit: ResolvedTemplate;
+    outreach: ResolvedTemplate;
+    offer: ResolvedTemplate;
+  };
+  scoringSummary: {
+    closeProbability: number;
+    urgencyScore: number;
+    momentumScore: number | null;
+  };
+  providerMetadata: {
+    source: string;
+  };
 };

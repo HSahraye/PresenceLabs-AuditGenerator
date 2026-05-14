@@ -2,14 +2,19 @@ import { OutreachView } from "@/components/outreach-view";
 import { requireRole } from "@/lib/auth";
 import { buildSignedAuditPath } from "@/lib/audit-links";
 import { prisma } from "@/lib/prisma";
+import { getPublicBaseUrl } from "@/lib/url";
+import { getWorkspaceContext, withWorkspaceFallbackScope } from "@/lib/workspace";
 
 export const dynamic = "force-dynamic";
 
 export default async function OutreachPage() {
   await requireRole(["admin", "sales", "viewer"]);
+  const { workspaceId } = await getWorkspaceContext();
+  const publicBaseUrl = getPublicBaseUrl();
   const now = new Date();
   const leads = await prisma.lead.findMany({
     where: {
+      ...withWorkspaceFallbackScope(workspaceId),
       OR: [
         { status: "New" },
         { status: "Follow-up" },
@@ -25,8 +30,8 @@ export default async function OutreachPage() {
     take: 100,
   });
 
-  const viewCounts = await prisma.viewLog.groupBy({ by: ["leadId"], _count: { leadId: true } });
-  const paymentCounts = await prisma.paymentLog.groupBy({ by: ["leadId"], _count: { leadId: true } });
+  const viewCounts = await prisma.viewLog.groupBy({ by: ["leadId"], where: withWorkspaceFallbackScope(workspaceId), _count: { leadId: true } });
+  const paymentCounts = await prisma.paymentLog.groupBy({ by: ["leadId"], where: withWorkspaceFallbackScope(workspaceId), _count: { leadId: true } });
   const viewCountByLead = new Map(viewCounts.map((item) => [item.leadId, item._count.leadId]));
   const paymentCountByLead = new Map(paymentCounts.map((item) => [item.leadId, item._count.leadId]));
 
@@ -45,6 +50,7 @@ export default async function OutreachPage() {
       publicAuditPath: buildSignedAuditPath(lead.id),
       painSummary: lead.painSummary,
       assetsJson: lead.assetsJson,
+      intelligenceJson: lead.intelligenceJson ?? null,
       nextFollowUpAt: lead.nextFollowUpAt?.toISOString() ?? null,
       lastContactedAt: lead.lastContactedAt?.toISOString() ?? null,
       viewCount: viewCountByLead.get(lead.id) ?? 0,
@@ -58,5 +64,5 @@ export default async function OutreachPage() {
       return bIntent - aIntent || b.score - a.score;
     });
 
-  return <OutreachView leads={mappedLeads} />;
+  return <OutreachView leads={mappedLeads} publicBaseUrl={publicBaseUrl} />;
 }

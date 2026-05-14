@@ -1,12 +1,15 @@
 import { ResearchQueueDashboard } from "@/components/research-queue-dashboard";
 import { requireRole } from "@/lib/auth";
 import { prisma } from "@/lib/prisma";
+import { getWorkspaceContext, withWorkspaceFallbackScope } from "@/lib/workspace";
 
 export const dynamic = "force-dynamic";
 
 export default async function ResearchPage() {
   await requireRole(["admin", "sales", "viewer"]);
+  const { workspaceId } = await getWorkspaceContext();
   const items = await prisma.researchQueueItem.findMany({
+    where: withWorkspaceFallbackScope(workspaceId),
     orderBy: [{ priority: "asc" }, { updatedAt: "desc" }],
   });
 

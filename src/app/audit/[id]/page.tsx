@@ -1,14 +1,20 @@
 import { notFound } from "next/navigation";
 import { ArrowRight, CheckCircle2, ExternalLink, MapPin, ShieldCheck, Sparkles, Star, XCircle } from "lucide-react";
 import { AuditViewTracker } from "@/components/audit-view-tracker";
+import { AuditGenLogo } from "@/components/brand/auditgen-logo";
 import { PaymentIntentLink } from "@/components/payment-intent-link";
 import { PrintButton } from "@/components/print-button";
+import { BRAND } from "@/lib/brand";
+import { resolvePublicSenderName } from "@/lib/branding";
 import { prisma } from "@/lib/prisma";
 import { estimatedDealValue, formatMoney } from "@/lib/money";
 import { formatRelativeTime } from "@/lib/utils";
 import type { AuditChecks, GeneratedAssets } from "@/lib/types";
+import { getCloseProbability, getLeadScores, getLeadStrengths, getPrimaryPainPoints, getRecommendedOffer } from "@/lib/intelligence/selectors";
+import { resolveTemplate } from "@/lib/templates";
 import { verifyAuditAccessToken } from "@/lib/audit-links";
 import { isAuthEnabled } from "@/lib/env";
+import { getWorkspaceContext, withWorkspaceFallbackScope } from "@/lib/workspace";
 
 const labels: Array<[keyof AuditChecks, string, string]> = [
   ["hasWebsite", "Website presence", "A real website customers can trust"],
@@ -58,21 +64,54 @@ export default async function ClientAuditPage({
   searchParams: Promise<{ token?: string }>;
 }) {
   const { id } = await params;
+  const { workspaceId } = await getWorkspaceContext();
   const query = await searchParams;
   const token = query.token ? String(query.token) : "";
   if (isAuthEnabled() && !verifyAuditAccessToken(token, id)) {
     notFound();
   }
-  const lead = await prisma.lead.findUnique({ where: { id }, include: { attachedCaseStudy: true } });
+  const lead = await prisma.lead.findFirst({ where: { id, ...withWorkspaceFallbackScope(workspaceId) }, include: { attachedCaseStudy: true } });
   if (!lead) notFound();
+  const brandingWorkspaceId = lead.workspaceId || workspaceId;
+  const workspaceSettings = await prisma.workspaceSettings.findUnique({ where: { workspaceId: brandingWorkspaceId } });
+  const template = await resolveTemplate(workspaceId, "audit", lead.category);
 
   const audit = JSON.parse(lead.auditJson) as { checks: AuditChecks; websiteSignals: string[]; warnings: string[]; source: string };
   const assets = JSON.parse(lead.assetsJson) as GeneratedAssets;
+  let generationContext: {
+    branding?: { brandName?: string; auditIntroCopy?: string; auditOutroCopy?: string; ctaLabelPrimary?: string; ctaLabelSecondary?: string };
+  } | null = null;
+  if (lead.generatedContextJson) {
+    try {
+      generationContext = JSON.parse(lead.generatedContextJson) as {
+        branding?: { brandName?: string; auditIntroCopy?: string; auditOutroCopy?: string; ctaLabelPrimary?: string; ctaLabelSecondary?: string };
+      };
+    } catch {
+      generationContext = null;
+    }
+  }
+  const brandName = resolvePublicSenderName(
+    {
+      publicCompanyName: generationContext?.branding?.brandName || workspaceSettings?.brandName || null,
+      brandName: workspaceSettings?.brandName || null,
+    },
+  );
+  const introCopy = generationContext?.branding?.auditIntroCopy;
+  const outroCopy = generationContext?.branding?.auditOutroCopy;
+  const ctaPrimary = generationContext?.branding?.ctaLabelPrimary || "Secure this package";
+  const ctaSecondary = generationContext?.branding?.ctaLabelSecondary || "Schedule a strategy call";
+  const scores = getLeadScores(lead);
+  const painPoints = getPrimaryPainPoints(lead);
+  const strengths = getLeadStrengths(lead);
   const tone = scoreCopy(lead.score);
-  const selectedPackage = lead.packageName || assets.recommendedPackage;
+  const selectedPackage = getRecommendedOffer(lead) || lead.packageName || assets.recommendedPackage;
   const selectedPrice = estimatedDealValue(selectedPackage, lead.customPrice);
-  const passed = labels.filter(([key]) => audit.checks[key]).length;
-  const failed = labels.length - passed;
+  const passed = strengths.length || labels.filter(([key]) => audit.checks[key]).length;
+  const failed = painPoints.length || labels.length - labels.filter(([key]) => audit.checks[key]).length;
+  const closeProbability = getCloseProbability(lead);
+  const sectionPlan = template.config.sectionOrder?.length
+    ? template.config.sectionOrder
+    : ["executiveSummary", "revenueOpportunities", "trustIssues", "conversionBlockers", "seoOpportunities", "quickWins", "recommendedNextSteps"];
   const deliverables = [
     ...labels
       .filter(([key]) => !audit.checks[key])
@@ -89,8 +128,8 @@ export default async function ClientAuditPage({
         <div className="relative mx-auto max-w-6xl">
           <nav className="flex items-center justify-between gap-4">
             <div>
-              <p className="text-xs font-black uppercase tracking-[0.28em] text-lime-300">Presence Labs</p>
-              <p className="mt-1 text-sm text-white/55">Local Presence Audit</p>
+              <AuditGenLogo variant="horizontal" className="h-9" monochrome />
+              <p className="mt-1 text-xs font-semibold uppercase tracking-[0.22em] text-white/60">Prepared by {brandName}</p>
             </div>
             <PrintButton />
           </nav>
@@ -106,7 +145,7 @@ export default async function ClientAuditPage({
                 </div>
               </div>
               <h1 className="mt-6 max-w-4xl text-5xl font-black tracking-tight sm:text-7xl">Online presence audit</h1>
-              <p className="mt-6 max-w-2xl text-lg leading-8 text-white/65">A focused review of how easily customers can trust, understand, and contact this business online.</p>
+              <p className="mt-6 max-w-2xl text-lg leading-8 text-white/65">{introCopy || "A focused review of how easily customers can trust, understand, and contact this business online."}</p>
               <div className="mt-7 flex flex-wrap gap-3 text-sm font-semibold text-white/70">
                 {lead.category ? <span className="rounded-full bg-white/10 px-4 py-2">{lead.category}</span> : null}
                 {lead.location ? <span className="inline-flex items-center gap-2 rounded-full bg-white/10 px-4 py-2"><MapPin className="size-4" />{lead.location}</span> : null}
@@ -139,6 +178,9 @@ export default async function ClientAuditPage({
                 <p className="mt-1 text-sm font-bold text-slate-600">Gaps to improve</p>
               </div>
             </div>
+            <p className="mt-4 text-xs font-black uppercase tracking-[0.14em] text-slate-500">
+              Close probability: {closeProbability}%
+            </p>
           </div>
 
           <div className="grid gap-3 sm:grid-cols-2">
@@ -156,6 +198,64 @@ export default async function ClientAuditPage({
                 </div>
               );
             })}
+          </div>
+        </div>
+      </section>
+
+      <section className="px-5 pb-6 sm:px-8 lg:px-12">
+        <div className="mx-auto max-w-6xl rounded-[2rem] border border-slate-200 bg-white p-6 shadow-sm">
+          <p className="text-sm font-black uppercase tracking-[0.22em] text-lime-700">Structured Intelligence Sections</p>
+          <div className="mt-4 grid gap-4 md:grid-cols-2">
+            {sectionPlan.includes("executiveSummary") ? (
+              <div className="rounded-2xl bg-slate-50 p-4">
+                <h3 className="font-black">Executive summary</h3>
+                <p className="mt-2 text-sm text-slate-700">{assets.painPointSummary}</p>
+              </div>
+            ) : null}
+            {sectionPlan.includes("revenueOpportunities") ? (
+              <div className="rounded-2xl bg-slate-50 p-4">
+                <h3 className="font-black">Revenue opportunities</h3>
+                <p className="mt-2 text-sm text-slate-700">{assets.likelyMoneyLost}</p>
+              </div>
+            ) : null}
+            {sectionPlan.includes("trustIssues") ? (
+              <div className="rounded-2xl bg-slate-50 p-4">
+                <h3 className="font-black">Trust issues</h3>
+                <p className="mt-2 text-sm text-slate-700">
+                  Trust score: {scores.trust}/100. {painPoints.find((item) => /trust|review|https/i.test(item)) || "Improve visible proof, reviews, and credibility markers."}
+                </p>
+              </div>
+            ) : null}
+            {sectionPlan.includes("conversionBlockers") ? (
+              <div className="rounded-2xl bg-slate-50 p-4">
+                <h3 className="font-black">Conversion blockers</h3>
+                <p className="mt-2 text-sm text-slate-700">
+                  Conversion score: {scores.conversion}/100. {painPoints.slice(0, 2).join(" · ") || "Clarify CTA and contact pathway."}
+                </p>
+              </div>
+            ) : null}
+            {sectionPlan.includes("seoOpportunities") ? (
+              <div className="rounded-2xl bg-slate-50 p-4">
+                <h3 className="font-black">SEO opportunities</h3>
+                <p className="mt-2 text-sm text-slate-700">SEO score: {scores.seo}/100. Prioritize title/meta quality, local relevance, and schema coverage.</p>
+              </div>
+            ) : null}
+            {sectionPlan.includes("quickWins") ? (
+              <div className="rounded-2xl bg-slate-50 p-4">
+                <h3 className="font-black">Quick wins</h3>
+                <ul className="mt-2 list-disc space-y-1 pl-5 text-sm text-slate-700">
+                  {painPoints.slice(0, 3).map((item) => <li key={item}>{item}</li>)}
+                </ul>
+              </div>
+            ) : null}
+            {sectionPlan.includes("recommendedNextSteps") || sectionPlan.includes("nextSteps") ? (
+              <div className="rounded-2xl bg-slate-50 p-4 md:col-span-2">
+                <h3 className="font-black">Recommended next steps</h3>
+                <p className="mt-2 text-sm text-slate-700">
+                  Start with {selectedPackage} and resolve the top conversion + trust blockers in the next 2-3 weeks.
+                </p>
+              </div>
+            ) : null}
           </div>
         </div>
       </section>
@@ -182,9 +282,9 @@ export default async function ClientAuditPage({
       {deliverables.length > 0 && (
         <section className="px-5 pb-6 sm:px-8 lg:px-12">
           <div className="mx-auto max-w-6xl rounded-[2rem] border border-slate-200 bg-white p-6 shadow-sm">
-            <p className="text-sm font-black uppercase tracking-[0.22em] text-lime-700">🛠️ What Presence Labs will build</p>
+            <p className="text-sm font-black uppercase tracking-[0.22em] text-lime-700">What {brandName} will build</p>
             <h2 className="mt-3 text-3xl font-black">Your complete fix list</h2>
-            <p className="mt-3 max-w-3xl text-sm leading-6 text-slate-500">Based on this audit, here is exactly what Presence Labs will deliver — no guesswork, no vague scope.</p>
+            <p className="mt-3 max-w-3xl text-sm leading-6 text-slate-500">Based on this audit, here is exactly what {brandName} will deliver — no guesswork, no vague scope.</p>
             <div className="mt-5 grid gap-3 sm:grid-cols-2 lg:grid-cols-3">
               {deliverables.map((item, i) => (
                 <div key={i} className="flex gap-3 rounded-2xl border border-slate-100 bg-slate-50 p-4">
@@ -203,11 +303,12 @@ export default async function ClientAuditPage({
       <section className="px-5 pb-14 sm:px-8 lg:px-12">
         <div className="mx-auto mb-6 max-w-6xl rounded-[2rem] bg-lime-300 p-6 text-slate-950 shadow-sm">
           <h2 className="text-3xl font-black">Want this fixed?</h2>
-          <p className="mt-3 max-w-3xl text-sm font-bold leading-7 text-slate-800">Presence Labs can turn this audit into a focused action plan and a cleaner online presence built to generate more calls, quote requests, and booked jobs.</p>
+          <p className="mt-3 max-w-3xl text-sm font-bold leading-7 text-slate-800">{brandName} can turn this audit into a focused action plan and a cleaner online presence built to generate more calls, quote requests, and booked jobs.</p>
           <div className="mt-5 flex flex-wrap gap-3">
-            {lead.stripePaymentUrl ? <PaymentIntentLink leadId={lead.id} href={lead.stripePaymentUrl} className="inline-flex items-center gap-2 rounded-full bg-slate-950 px-5 py-3 text-sm font-black text-white transition hover:bg-slate-800">Secure this package <ArrowRight className="size-4" /></PaymentIntentLink> : null}
-            <a href={process.env.NEXT_PUBLIC_CALENDLY_URL || "mailto:hello@presencelabs.ai?subject=Strategy%20Call%20for%20Local%20Presence%20Audit"} className="inline-flex items-center gap-2 rounded-full bg-white px-5 py-3 text-sm font-black text-slate-950 transition hover:bg-lime-50">Schedule a strategy call <ArrowRight className="size-4" /></a>
+            {lead.stripePaymentUrl ? <PaymentIntentLink leadId={lead.id} href={lead.stripePaymentUrl} className="inline-flex items-center gap-2 rounded-full bg-slate-950 px-5 py-3 text-sm font-black text-white transition hover:bg-slate-800">{ctaPrimary} <ArrowRight className="size-4" /></PaymentIntentLink> : null}
+            <a href={process.env.NEXT_PUBLIC_CALENDLY_URL || "mailto:hello@presencelabs.ai?subject=Strategy%20Call%20for%20Local%20Presence%20Audit"} className="inline-flex items-center gap-2 rounded-full bg-white px-5 py-3 text-sm font-black text-slate-950 transition hover:bg-lime-50">{ctaSecondary} <ArrowRight className="size-4" /></a>
           </div>
+          {outroCopy ? <p className="mt-4 text-xs font-semibold uppercase tracking-[0.1em] text-slate-700">{outroCopy}</p> : null}
         </div>
         {lead.attachedCaseStudy ? <div className="mx-auto mb-6 max-w-6xl rounded-[2rem] border border-lime-200 bg-white p-6 shadow-sm">
           <p className="text-sm font-black uppercase tracking-[0.22em] text-lime-700">Recent Success</p>
@@ -218,7 +319,7 @@ export default async function ClientAuditPage({
         <div className="mx-auto grid max-w-6xl gap-6 lg:grid-cols-2">
           <div className="rounded-[2rem] border border-slate-200 bg-white p-6 shadow-sm">
             <ShieldCheck className="size-10 text-lime-700" />
-            <h2 className="mt-5 text-3xl font-black">Recommended Presence Labs package</h2>
+            <h2 className="mt-5 text-3xl font-black">Recommended package from {brandName}</h2>
             <p className="mt-4 text-lg font-black text-lime-700">{selectedPackage}</p>
             <p className="mt-3 inline-flex rounded-full bg-slate-950 px-4 py-2 text-sm font-black text-white">Recommended investment: {formatMoney(selectedPrice)}</p>
             <p className="mt-4 text-sm leading-7 text-slate-600">{assets.presenceLabsOffer}</p>
@@ -230,6 +331,9 @@ export default async function ClientAuditPage({
             <a href="mailto:hello@presencelabs.ai?subject=Local%20business%20audit" className="mt-7 inline-flex items-center gap-2 rounded-full bg-lime-300 px-5 py-3 text-sm font-black text-slate-950 transition hover:bg-lime-200">Book a discovery call <ArrowRight className="size-4" /></a>
           </div>
         </div>
+        <p className="mx-auto mt-8 max-w-6xl text-center text-xs font-semibold uppercase tracking-[0.18em] text-[#64748B]">
+          Generated with {BRAND.productName}
+        </p>
       </section>
     </main>
   );
