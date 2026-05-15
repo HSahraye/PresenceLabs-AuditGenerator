@@ -209,17 +209,18 @@ const MonthlyGoalCard = memo(function MonthlyGoalCard({ wonRevenue }: { wonReven
   return (
     <div className="rounded-[2rem] border border-slate-200 bg-white p-5 shadow-sm">
       <div className="flex items-center justify-between gap-2">
-        <p className="text-xs font-black uppercase tracking-[0.18em] text-slate-400">Monthly Goal</p>
+        <p className="text-sm font-black text-slate-900">Monthly Goal</p>
         <button
           onClick={() => {
             setGoalInput(monthlyGoal > 0 ? String(monthlyGoal) : "");
             setEditingGoal(true);
           }}
-          className="text-xs font-black text-slate-400 hover:text-slate-700"
+          className="text-xs font-black text-slate-500 hover:text-slate-700"
         >
           {monthlyGoal > 0 ? "Edit" : "Set goal"}
         </button>
       </div>
+      <p className="mt-1 text-xs text-slate-500">Set a monthly won-revenue target to track progress.</p>
       {editingGoal ? (
         <div className="mt-2 flex gap-2">
           <input
@@ -237,11 +238,13 @@ const MonthlyGoalCard = memo(function MonthlyGoalCard({ wonRevenue }: { wonReven
         </div>
       ) : monthlyGoal > 0 ? (
         <>
-          <div className="mt-2 flex items-end gap-2">
+          <div className="mt-3 flex flex-wrap items-end justify-between gap-2">
             <p className={`text-3xl font-black ${wonRevenue >= monthlyGoal ? "text-lime-600" : "text-slate-950"}`}>
               {Math.round((wonRevenue / monthlyGoal) * 100)}%
             </p>
-            <p className="mb-1 text-xs font-bold text-slate-400">of {formatMoney(monthlyGoal)}</p>
+            <p className="text-sm font-bold text-slate-500">
+              {formatMoney(wonRevenue)} / {formatMoney(monthlyGoal)}
+            </p>
           </div>
           <div className="mt-2 h-2 w-full overflow-hidden rounded-full bg-slate-100">
             <div
@@ -257,7 +260,12 @@ const MonthlyGoalCard = memo(function MonthlyGoalCard({ wonRevenue }: { wonReven
           </button>
         </>
       ) : (
-        <p className="mt-2 text-sm text-slate-400">No goal set yet</p>
+        <>
+          <p className="mt-3 text-sm text-slate-500">No goal set yet</p>
+          <div className="mt-3 h-2 w-full overflow-hidden rounded-full bg-slate-100">
+            <div className="h-full w-0 rounded-full bg-slate-200" />
+          </div>
+        </>
       )}
     </div>
   );
@@ -791,13 +799,16 @@ export function AuditDashboard({
         </div>
       )}
 
-      <header className="w-full px-3 py-5 sm:px-4 lg:px-6">
+      <header className="w-full px-3 py-4 sm:px-4 lg:px-6">
         <div className="mx-auto w-full max-w-screen-2xl">
-          <div className="rounded-3xl border border-slate-200 bg-white/90 p-4 shadow-sm sm:p-6">
-            <div className="grid grid-cols-1 items-start gap-5 xl:grid-cols-[minmax(0,1fr)_360px]">
+          <div className="relative overflow-hidden rounded-3xl border border-slate-200 bg-gradient-to-br from-white via-slate-50/70 to-emerald-50/40 p-4 shadow-sm sm:p-5">
+            <div className="pointer-events-none absolute inset-0 opacity-40" style={{ backgroundImage: "radial-gradient(circle at 1px 1px, rgba(15,23,42,0.08) 1px, transparent 0)", backgroundSize: "18px 18px" }} />
+            <div className="pointer-events-none absolute -left-8 top-8 h-48 w-48 rounded-full bg-emerald-200/40 blur-3xl" />
+            <div className="pointer-events-none absolute left-44 top-10 h-40 w-40 rounded-full bg-sky-100/40 blur-3xl" />
+            <div className="relative grid grid-cols-1 items-start gap-5 xl:grid-cols-[minmax(0,1fr)_360px]">
               <div className="min-w-0">
                 <AuditGenBrandLockup />
-                <h1 className="mt-4 text-2xl font-black tracking-tight text-[#0F172A] sm:text-3xl">
+                <h1 className="mt-4 max-w-3xl text-3xl font-black tracking-tight text-[#0F172A] sm:text-[2.05rem]">
                   Turn local business research into client-ready audits.
                 </h1>
                 <p className="mt-3 max-w-3xl text-sm leading-6 text-[#64748B]">
@@ -816,29 +827,41 @@ export function AuditDashboard({
                   <Link href="/sequences" className="rounded-2xl border border-slate-200 bg-white px-4 py-2.5 text-sm font-black text-slate-700 transition hover:bg-slate-50">Sequences</Link>
                   <Link href="/automation/approvals" className="rounded-2xl border border-slate-200 bg-white px-4 py-2.5 text-sm font-black text-slate-700 transition hover:bg-slate-50">Approvals</Link>
                 </div>
+                <div className="mt-5 rounded-2xl border border-slate-200/80 bg-white/80 p-3 shadow-sm backdrop-blur-sm">
+                  <p className="text-[11px] font-black uppercase tracking-[0.14em] text-slate-500">How AuditGen works</p>
+                  <div className="mt-3 flex flex-wrap items-center gap-1.5 sm:gap-2">
+                    <span className="inline-flex h-9 items-center rounded-xl border border-slate-200 bg-white px-3 text-xs font-black text-slate-700">Import Leads</span>
+                    <span className="inline-flex size-6 items-center justify-center rounded-full border border-slate-200 bg-slate-50 text-[11px] font-black text-slate-500">→</span>
+                    <span className="inline-flex h-9 items-center rounded-xl border border-slate-200 bg-white px-3 text-xs font-black text-slate-700">Generate AI Audit</span>
+                    <span className="inline-flex size-6 items-center justify-center rounded-full border border-slate-200 bg-slate-50 text-[11px] font-black text-slate-500">→</span>
+                    <span className="inline-flex h-9 items-center rounded-xl border border-slate-200 bg-white px-3 text-xs font-black text-slate-700">Prep Outreach</span>
+                    <span className="inline-flex size-6 items-center justify-center rounded-full border border-slate-200 bg-slate-50 text-[11px] font-black text-slate-500">→</span>
+                    <span className="inline-flex h-9 items-center rounded-xl border border-emerald-200 bg-emerald-50 px-3 text-xs font-black text-emerald-800">Track Revenue</span>
+                  </div>
+                </div>
               </div>
 
-              <div className="grid min-w-0 gap-3">
-                <div className="rounded-2xl border border-slate-200 bg-white p-4 shadow-sm">
+              <div className="grid min-w-0 gap-2.5">
+                <div className="rounded-2xl border border-slate-200/80 bg-white/85 p-3 shadow-sm backdrop-blur-sm">
                   <p className="text-xs font-bold uppercase tracking-[0.14em] text-[#64748B]">Workspace</p>
                   <div className="mt-2">
                     <WorkspaceSwitcher activeWorkspaceId={activeWorkspaceId} items={workspaceOptions} canManageWorkspace={canManageWorkspace} />
                   </div>
                 </div>
                 <div className="grid grid-cols-2 gap-3">
-                  <div className="rounded-2xl border border-slate-200 bg-white p-4 shadow-sm">
+                  <div className="rounded-2xl border border-slate-200/80 bg-white/85 p-3 shadow-sm">
                     <div className="flex items-center gap-2">
                       <BarChart3 className="size-4 text-[#10B981]" />
                       <p className="text-xs font-bold uppercase tracking-[0.14em] text-[#64748B]">Saved leads</p>
                     </div>
-                    <p className="mt-2 text-2xl font-black text-[#0F172A]">{parsedLeads.length}</p>
+                    <p className="mt-2 text-xl font-black text-[#0F172A]">{parsedLeads.length}</p>
                   </div>
-                  <div className="rounded-2xl border border-slate-200 bg-white p-4 shadow-sm">
+                  <div className="rounded-2xl border border-slate-200/80 bg-white/85 p-3 shadow-sm">
                     <p className="text-xs font-bold uppercase tracking-[0.14em] text-[#64748B]">Intent events</p>
-                    <p className="mt-2 text-2xl font-black text-[#0F172A]">{opsMetrics.eventsLast24h}</p>
+                    <p className="mt-2 text-xl font-black text-[#0F172A]">{opsMetrics.eventsLast24h}</p>
                   </div>
                 </div>
-                <div className="rounded-2xl border border-slate-200 bg-slate-50 p-4">
+                <div className="rounded-2xl border border-slate-200/80 bg-slate-50/90 p-3">
                   <p className="text-xs font-bold uppercase tracking-[0.14em] text-[#64748B]">Top lead preview</p>
                   <p className="mt-2 text-sm font-black text-[#0F172A]">{bestLead?.businessName ?? "No leads yet"}</p>
                   <p className="mt-1 text-xs font-semibold text-slate-600">Audit score {bestLead?.score ?? 0}</p>
@@ -990,14 +1013,24 @@ export function AuditDashboard({
 
         <section className="min-w-0 w-full grid gap-6">
 
-          <div className="grid gap-3 md:grid-cols-3">
-            <div className="rounded-[2rem] border border-slate-200 bg-white p-5 shadow-sm"><p className="text-xs font-black uppercase tracking-[0.18em] text-slate-400">Total Pipeline</p><p className="mt-2 text-3xl font-black">{formatMoney(moneyStats.totalPipeline)}</p><p className="mt-1 text-xs font-bold text-slate-500">New + Contacted + Follow-up</p></div>
-            <div className="rounded-[2rem] border border-slate-200 bg-white p-5 shadow-sm"><p className="text-xs font-black uppercase tracking-[0.18em] text-slate-400">Weighted Pipeline</p><p className="mt-2 text-3xl font-black text-lime-700">{formatMoney(moneyStats.weightedPipeline)}</p><p className="mt-1 text-xs font-bold text-slate-500">20/40/70% stage weighting</p></div>
-            <div className="rounded-[2rem] border border-slate-200 bg-white p-5 shadow-sm"><p className="text-xs font-black uppercase tracking-[0.18em] text-slate-400">Won Revenue</p><p className="mt-2 text-3xl font-black">{formatMoney(moneyStats.wonRevenue)}</p><p className="mt-1 text-xs font-bold text-slate-500">Closed won work</p></div>
-            <div className="rounded-[2rem] border border-slate-200 bg-white p-5 shadow-sm"><p className="text-xs font-black uppercase tracking-[0.18em] text-slate-400">Ops Queue Depth</p><p className="mt-2 text-3xl font-black">{opsMetrics.queueDepth}</p><p className="mt-1 text-xs font-bold text-slate-500">Queued/Running imports</p></div>
-            <div className="rounded-[2rem] border border-slate-200 bg-white p-5 shadow-sm"><p className="text-xs font-black uppercase tracking-[0.18em] text-slate-400">Failed Jobs</p><p className="mt-2 text-3xl font-black">{opsMetrics.failedJobsCount}</p><p className="mt-1 text-xs font-bold text-slate-500">Import jobs needing retry</p></div>
-            <div className="rounded-[2rem] border border-slate-200 bg-white p-5 shadow-sm"><p className="text-xs font-black uppercase tracking-[0.18em] text-slate-400">Events (24h)</p><p className="mt-2 text-3xl font-black">{opsMetrics.eventsLast24h}</p><p className="mt-1 text-xs font-bold text-slate-500">Tracked lead/payment events</p></div>
+          <div className="grid gap-5">
+            <div>
+              <h2 className="text-lg font-black text-slate-900">Revenue Overview</h2>
+              <div className="mt-3 grid gap-4 sm:grid-cols-2 xl:grid-cols-3">
+                <div className="rounded-[2rem] border border-slate-200 bg-white p-6 shadow-sm"><p className="text-xs font-black uppercase tracking-[0.14em] text-slate-400">Total Pipeline</p><p className="mt-2 text-4xl font-black">{formatMoney(moneyStats.totalPipeline)}</p><p className="mt-1 text-xs font-bold text-slate-500">New + Contacted + Follow-up</p></div>
+                <div className="rounded-[2rem] border border-slate-200 bg-white p-6 shadow-sm"><p className="text-xs font-black uppercase tracking-[0.14em] text-slate-400">Weighted Pipeline</p><p className="mt-2 text-4xl font-black text-lime-700">{formatMoney(moneyStats.weightedPipeline)}</p><p className="mt-1 text-xs font-bold text-slate-500">20/40/70% stage weighting</p></div>
+                <div className="rounded-[2rem] border border-slate-200 bg-white p-6 shadow-sm"><p className="text-xs font-black uppercase tracking-[0.14em] text-slate-400">Won Revenue</p><p className="mt-2 text-4xl font-black">{formatMoney(moneyStats.wonRevenue)}</p><p className="mt-1 text-xs font-bold text-slate-500">Closed won work</p></div>
+              </div>
+            </div>
             <MonthlyGoalCard wonRevenue={moneyStats.wonRevenue} />
+            <div>
+              <h2 className="text-lg font-black text-slate-900">System Health</h2>
+              <div className="mt-3 grid gap-4 sm:grid-cols-2 xl:grid-cols-3">
+                <div className="rounded-[2rem] border border-slate-200 bg-white p-4 shadow-sm"><p className="text-xs font-black uppercase tracking-[0.14em] text-slate-400">Import Queue</p><p className="mt-2 text-xl font-black">{opsMetrics.queueDepth}</p><p className="mt-1 text-xs font-bold text-slate-500">Queued/Running imports</p></div>
+                <div className="rounded-[2rem] border border-slate-200 bg-white p-4 shadow-sm"><p className="text-xs font-black uppercase tracking-[0.14em] text-slate-400">Failed Jobs</p><p className="mt-2 text-xl font-black">{opsMetrics.failedJobsCount}</p><p className="mt-1 text-xs font-bold text-slate-500">Import jobs needing retry</p></div>
+                <div className="rounded-[2rem] border border-slate-200 bg-white p-4 shadow-sm"><p className="text-xs font-black uppercase tracking-[0.14em] text-slate-400">Events (24h)</p><p className="mt-2 text-xl font-black">{opsMetrics.eventsLast24h}</p><p className="mt-1 text-xs font-bold text-slate-500">Tracked lead/payment events</p></div>
+              </div>
+            </div>
           </div>
 
           {/* ⚡ Strike Window — 2-hour golden closing window */}
