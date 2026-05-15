@@ -15,6 +15,7 @@ import { buildMailtoHref, buildSmsHref, buildWhatsAppHref } from "@/lib/communic
 import { getCloseProbability, getLeadHealthState, getLeadPriorityState, getMomentumLevel, getUrgencyLevel } from "@/lib/intelligence/selectors";
 import { toCsv } from "@/lib/csv";
 import { estimatedDealValue, formatMoney, weightedDealValue } from "@/lib/money";
+import { buildPrepPath } from "@/lib/prep-links";
 import { formatRelativeTime } from "@/lib/utils";
 import type { AuditChecks, GeneratedAssets } from "@/lib/types";
 
@@ -299,6 +300,7 @@ export function AuditDashboard({
   const [isSavingNotes, startNotesTransition] = useTransition();
   const [isRegenerating, startRegenerateTransition] = useTransition();
   const [copiedLeadId, setCopiedLeadId] = useState("");
+  const [copiedPrepLeadId, setCopiedPrepLeadId] = useState("");
   const [notesSavedLeadId, setNotesSavedLeadId] = useState("");
   const [notesError, setNotesError] = useState("");
   const [actionError, setActionError] = useState("");
@@ -332,6 +334,18 @@ export function AuditDashboard({
       window.cancelAnimationFrame(frame);
     };
   }, []);
+
+  useEffect(() => {
+    if (offerState.ok && offerState.leadId) {
+      router.refresh();
+    }
+  }, [offerState.ok, offerState.leadId, router]);
+
+  useEffect(() => {
+    if (shortSlugState.ok && shortSlugState.leadId) {
+      router.refresh();
+    }
+  }, [shortSlugState.ok, shortSlugState.leadId, router]);
 
   useEffect(() => {
     if (!trackedImportJobId) return;
@@ -543,12 +557,19 @@ export function AuditDashboard({
   }, [nowMs, parsedLeads]);
 
   const auditUrl = (lead: LeadView) => `${publicBaseUrl}${lead.publicAuditPath}`;
+  const prepUrl = (lead: LeadView) => `${publicBaseUrl}${buildPrepPath({ id: lead.id, shortSlug: lead.shortSlug })}`;
 
   const copyAuditUrl = async (lead: LeadView) => {
     await navigator.clipboard.writeText(auditUrl(lead));
     setCopiedLeadId(lead.id);
-    void logOutreachAction(lead.id, "Share", "Copied short audit link");
+    void logOutreachAction(lead.id, "Share", "Copied public audit link");
     window.setTimeout(() => setCopiedLeadId((current) => (current === lead.id ? "" : current)), 1800);
+  };
+
+  const copyPrepUrl = async (lead: LeadView) => {
+    await navigator.clipboard.writeText(prepUrl(lead));
+    setCopiedPrepLeadId(lead.id);
+    window.setTimeout(() => setCopiedPrepLeadId((current) => (current === lead.id ? "" : current)), 1800);
   };
 
   const deleteLead = (id: string, name: string) => {
@@ -1222,11 +1243,21 @@ export function AuditDashboard({
                     <select value={lead.status} disabled={isUpdatingStatus} onClick={(event) => event.stopPropagation()} onChange={(event) => updateStatus(lead.id, event.target.value as LeadStatus)} className="h-9 rounded-xl border border-slate-200 bg-white px-2 text-xs font-black text-slate-700 outline-none focus:border-lime-400">
                       {statuses.map((status) => <option key={status} value={status}>{status}</option>)}
                     </select>
-                    <Link href={`/prep/${lead.id}`} target="_blank" onClick={(event) => event.stopPropagation()} className="inline-flex items-center gap-1 rounded-xl bg-lime-300 px-3 py-2 text-xs font-black text-slate-950 transition hover:bg-lime-200">
-                      📋 Prep
+                    <Link href={buildPrepPath({ id: lead.id, shortSlug: lead.shortSlug })} target="_blank" onClick={(event) => event.stopPropagation()} className="inline-flex items-center gap-1 rounded-xl bg-lime-300 px-3 py-2 text-xs font-black text-slate-950 transition hover:bg-lime-200">
+                      📋 Internal prep
                     </Link>
                     <button type="button" onClick={(event) => { event.stopPropagation(); void copyAuditUrl(lead); }} className="inline-flex items-center gap-1 rounded-xl border border-slate-200 bg-white px-3 py-2 text-xs font-black text-slate-700 transition hover:bg-slate-50">
-                      <Share2 className="size-4" /> {copiedLeadId === lead.id ? "Short link copied!" : "Copy short link"}
+                      <Share2 className="size-4" /> {copiedLeadId === lead.id ? "Public audit link copied!" : "Copy public audit link"}
+                    </button>
+                    <button
+                      type="button"
+                      onClick={(event) => {
+                        event.stopPropagation();
+                        void copyPrepUrl(lead);
+                      }}
+                      className="inline-flex items-center gap-1 rounded-xl border border-slate-200 bg-white px-3 py-2 text-xs font-black text-slate-700 transition hover:bg-slate-50"
+                    >
+                      {copiedPrepLeadId === lead.id ? "Internal prep link copied!" : "Copy internal prep link"}
                     </button>
                     {activeSequences.length ? (
                       <button
@@ -1258,39 +1289,6 @@ export function AuditDashboard({
 
           {selected ? (
             <div className="grid gap-6">
-              <div className="rounded-[2rem] border border-slate-200 bg-white p-6 shadow-sm">
-                <div className="flex flex-col gap-4 md:flex-row md:items-start md:justify-between">
-                  <div>
-                    <p className="text-sm font-black uppercase tracking-[0.22em] text-lime-700">Selected lead</p>
-                    <div className="mt-2 flex flex-wrap items-center gap-3">
-                      <h2 className="text-3xl font-black">{selected.businessName}</h2>
-                      <span className={`rounded-full border px-3 py-1 text-xs font-black ${statusTone(selected.status)}`}>{selected.status}</span>
-                      <span className="text-xs font-black uppercase tracking-[0.16em] text-slate-400">Updated {formatRelativeTime(selected.updatedAt)}</span>
-                    </div>
-                    <p className="mt-3 max-w-3xl text-sm leading-6 text-slate-600">{selected.painSummary}</p>
-                  </div>
-                  <div className={`rounded-3xl px-6 py-5 text-center ${scoreTone(selected.score)}`}>
-                    <p className="text-4xl font-black">{selected.score}</p>
-                    <p className="text-xs font-black uppercase tracking-[0.18em] opacity-70">Lead score</p>
-                  </div>
-                </div>
-                <form key={`short-slug-${selected.id}`} action={shortSlugFormAction} className="mt-4 grid gap-2 sm:grid-cols-[1fr_auto]">
-                  <input type="hidden" name="id" value={selected.id} />
-                  <label className="grid gap-1 text-xs font-black uppercase tracking-[0.14em] text-slate-500">
-                    Short audit link slug
-                    <input
-                      name="shortSlug"
-                      defaultValue={selected.shortSlug || ""}
-                      placeholder="bay-detail"
-                      className="h-10 rounded-xl border border-slate-200 px-3 text-sm font-bold lowercase outline-none focus:border-lime-400"
-                    />
-                  </label>
-                  <button className="h-10 rounded-xl bg-slate-950 px-4 text-xs font-black text-white transition hover:bg-slate-800">Save slug</button>
-                  {shortSlugState.ok && shortSlugState.leadId === selected.id ? <p className="rounded-xl bg-lime-50 p-2 text-xs font-black text-lime-800">Short slug saved.</p> : null}
-                  {!shortSlugState.ok && shortSlugState.error && shortSlugState.leadId === selected.id ? <p className="rounded-xl bg-rose-50 p-2 text-xs font-black text-rose-700">{shortSlugState.error}</p> : null}
-                </form>
-              </div>
-
               <form key={`offer-${selected.id}`} action={offerFormAction} className="rounded-[2rem] border border-slate-200 bg-white p-5 shadow-sm">
                 <input type="hidden" name="id" value={selected.id} />
                 <div className="flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
@@ -1314,8 +1312,62 @@ export function AuditDashboard({
                   </select>
                   <input name="stripePaymentUrl" type="url" defaultValue={selected.stripePaymentUrl ?? ""} placeholder="Stripe payment link / deposit URL" className="h-11 rounded-2xl border border-slate-200 px-3 text-sm font-bold outline-none focus:border-lime-400" />
                 </div>
+                <div className="mt-4 grid gap-2 rounded-2xl border border-slate-200 bg-slate-50 p-3">
+                  <p className="text-xs font-black uppercase tracking-[0.14em] text-slate-500">Link controls</p>
+                  <div className="grid gap-2 sm:grid-cols-[1fr_auto] sm:items-center">
+                    <div className="min-w-0">
+                      <p className="text-xs font-black text-slate-700">Public audit link</p>
+                      <p className="truncate text-xs text-slate-500">{auditUrl(selected)}</p>
+                    </div>
+                    <button
+                      type="button"
+                      onClick={() => {
+                        void copyAuditUrl(selected);
+                      }}
+                      className="h-9 rounded-xl border border-slate-200 bg-white px-3 text-xs font-black text-slate-700 hover:bg-slate-50"
+                    >
+                      {copiedLeadId === selected.id ? "Copied public link" : "Copy public audit link"}
+                    </button>
+                  </div>
+                  <div className="grid gap-2 sm:grid-cols-[1fr_auto] sm:items-center">
+                    <div className="min-w-0">
+                      <p className="text-xs font-black text-slate-700">Internal prep link</p>
+                      <p className="truncate text-xs text-slate-500">{prepUrl(selected)}</p>
+                    </div>
+                    <button
+                      type="button"
+                      onClick={() => {
+                        void copyPrepUrl(selected);
+                      }}
+                      className="h-9 rounded-xl border border-slate-200 bg-white px-3 text-xs font-black text-slate-700 hover:bg-slate-50"
+                    >
+                      {copiedPrepLeadId === selected.id ? "Copied prep link" : "Copy internal prep link"}
+                    </button>
+                  </div>
+                </div>
                 {offerState && !offerState.ok && offerState.error ? <p className="mt-3 rounded-2xl bg-rose-50 p-3 text-sm font-bold text-rose-700">{offerState.error}</p> : null}
                 {offerState && offerState.ok && offerState.leadId === selected.id ? <p className="mt-3 rounded-2xl bg-lime-50 p-3 text-sm font-bold text-lime-800">Offer saved.</p> : null}
+              </form>
+
+              <form key={`short-slug-${selected.id}`} action={shortSlugFormAction} className="rounded-[2rem] border border-slate-200 bg-white p-5 shadow-sm">
+                <input type="hidden" name="id" value={selected.id} />
+                <div className="grid gap-3 sm:grid-cols-[1fr_auto] sm:items-end">
+                  <label className="grid gap-1 text-xs font-black uppercase tracking-[0.14em] text-slate-500">
+                    Short public audit link
+                    <input
+                      name="shortSlug"
+                      defaultValue={selected.shortSlug || ""}
+                      placeholder="nebula-smoke-shop"
+                      className="h-10 rounded-xl border border-slate-200 px-3 text-sm font-bold lowercase outline-none focus:border-lime-400"
+                    />
+                    <span className="text-[11px] normal-case tracking-normal text-slate-500">
+                      Used for printable/client-facing audit URLs like <span className="font-bold">/a/nebula-smoke-shop</span>.
+                    </span>
+                  </label>
+                  <button className="h-10 rounded-xl bg-slate-950 px-4 text-xs font-black text-white transition hover:bg-slate-800">Save public slug</button>
+                </div>
+                {shortSlugState.ok && shortSlugState.leadId === selected.id ? <p className="mt-3 rounded-xl bg-lime-50 p-2 text-xs font-black text-lime-800">Public audit slug saved.</p> : null}
+                {!shortSlugState.ok && shortSlugState.error && shortSlugState.leadId === selected.id ? <p className="mt-3 rounded-xl bg-rose-50 p-2 text-xs font-black text-rose-700">{shortSlugState.error}</p> : null}
               </form>
 
               <form key={selected.id} onSubmit={(event) => { event.preventDefault(); saveNotes(new FormData(event.currentTarget), selected.id); }} className="rounded-[2rem] border border-slate-200 bg-white p-5 shadow-sm">

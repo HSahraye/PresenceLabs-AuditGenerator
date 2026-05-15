@@ -36,23 +36,30 @@ export default async function MeetingPrepPage({ params }: { params: Promise<{ id
   await requireRole(["admin", "sales", "viewer"]);
   const { workspaceId } = await getWorkspaceContext();
   const { id } = await params;
-  const lead = await prisma.lead.findFirst({
-    where: { id, ...withWorkspaceFallbackScope(workspaceId) },
-    include: {
-      attachedCaseStudy: true,
-      viewLogs: { orderBy: { createdAt: "desc" }, take: 20 },
-      paymentLogs: { orderBy: { createdAt: "desc" }, take: 20 },
-      outreachLogs: { orderBy: { createdAt: "desc" }, take: 20 },
-      sequenceStates: {
-        where: { workspaceId },
-        include: {
-          sequence: { include: { steps: { orderBy: { stepOrder: "asc" } } } },
-          outboundMessages: { orderBy: { createdAt: "desc" }, take: 1 },
-        },
-        orderBy: { updatedAt: "desc" },
+  const leadInclude = {
+    attachedCaseStudy: true,
+    viewLogs: { orderBy: { createdAt: "desc" }, take: 20 },
+    paymentLogs: { orderBy: { createdAt: "desc" }, take: 20 },
+    outreachLogs: { orderBy: { createdAt: "desc" }, take: 20 },
+    sequenceStates: {
+      where: { workspaceId },
+      include: {
+        sequence: { include: { steps: { orderBy: { stepOrder: "asc" } } } },
+        outboundMessages: { orderBy: { createdAt: "desc" }, take: 1 },
       },
+      orderBy: { updatedAt: "desc" },
     },
+  } as const;
+  const leadById = await prisma.lead.findFirst({
+    where: { id, ...withWorkspaceFallbackScope(workspaceId) },
+    include: leadInclude,
   });
+  const lead = leadById
+    ? leadById
+    : await prisma.lead.findFirst({
+        where: { shortSlug: String(id || "").toLowerCase(), ...withWorkspaceFallbackScope(workspaceId) },
+        include: leadInclude,
+      });
   if (!lead) notFound();
   const brandingWorkspaceId = lead.workspaceId || workspaceId;
   const workspaceSettings = await prisma.workspaceSettings.findUnique({ where: { workspaceId: brandingWorkspaceId } });

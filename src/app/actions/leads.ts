@@ -215,7 +215,7 @@ export async function updateLeadOfferAction(_prevState: unknown, formData: FormD
   });
   if (!parsed.success) return { ok: false, error: "Invalid offer update.", leadId: "" };
 
-  await prisma.lead.updateMany({
+  const updateResult = await prisma.lead.updateMany({
     where: { id: parsed.data.id, ...withWorkspaceFallbackScope(workspaceId) },
     data: {
       packageName: parsed.data.packageName,
@@ -224,9 +224,13 @@ export async function updateLeadOfferAction(_prevState: unknown, formData: FormD
       stripePaymentUrl: parsed.data.stripePaymentUrl || null,
     },
   });
+  if (updateResult.count === 0) {
+    return { ok: false, error: "Lead not found in the active workspace.", leadId: parsed.data.id };
+  }
 
   revalidatePath("/");
   revalidatePath(`/audit/${parsed.data.id}`);
+  revalidatePath(`/prep/${parsed.data.id}`);
   await writeAuditLog({
     action: "lead.offer.update",
     actorRole,

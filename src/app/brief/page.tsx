@@ -5,6 +5,7 @@ import { prisma } from "@/lib/prisma";
 import { estimatedDealValue, formatMoney, weightedDealValue } from "@/lib/money";
 import { requireRole } from "@/lib/auth";
 import { getCloseProbability, getLeadPriorityState } from "@/lib/intelligence/selectors";
+import { buildPrepPath } from "@/lib/prep-links";
 import { getWorkspaceContext, withWorkspaceFallbackScope } from "@/lib/workspace";
 
 export const dynamic = "force-dynamic";
@@ -89,6 +90,7 @@ export default async function BriefPage() {
       where: { ...withWorkspaceFallbackScope(workspaceId), status: { notIn: ["Won", "Lost"] } },
       select: {
         id: true,
+        shortSlug: true,
         businessName: true,
         score: true,
         packageName: true,
@@ -221,8 +223,8 @@ export default async function BriefPage() {
                           <Phone className="size-3.5" />
                         </a>
                       )}
-                      <Link href={`/prep/${lead.id}`} className="inline-flex h-8 items-center rounded-xl border border-slate-200 bg-white px-2 text-xs font-black text-slate-700 hover:bg-slate-50">
-                        Prep
+                      <Link href={buildPrepPath({ id: lead.id, shortSlug: lead.shortSlug })} className="inline-flex h-8 items-center rounded-xl border border-slate-200 bg-white px-2 text-xs font-black text-slate-700 hover:bg-slate-50">
+                        Internal prep
                       </Link>
                     </div>
                   </div>
