@@ -1,6 +1,6 @@
 import { OutreachView } from "@/components/outreach-view";
 import { requireRole } from "@/lib/auth";
-import { buildSignedAuditPath } from "@/lib/audit-links";
+import { buildPreferredAuditPath } from "@/lib/audit-links";
 import { prisma } from "@/lib/prisma";
 import { getPublicBaseUrl } from "@/lib/url";
 import { getWorkspaceContext, withWorkspaceFallbackScope } from "@/lib/workspace";
@@ -47,7 +47,7 @@ export default async function OutreachPage() {
       email: lead.email,
       status: lead.status,
       score: lead.score,
-      publicAuditPath: buildSignedAuditPath(lead.id),
+      publicAuditPath: buildPreferredAuditPath({ leadId: lead.id, shortSlug: lead.shortSlug }),
       painSummary: lead.painSummary,
       assetsJson: lead.assetsJson,
       intelligenceJson: lead.intelligenceJson ?? null,

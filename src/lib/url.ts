@@ -1,3 +1,5 @@
+import { buildPreferredAuditPath } from "@/lib/audit-links";
+
 function normalizeBaseUrl(value: string) {
   if (!value) return "";
   const trimmed = value.trim();
@@ -17,4 +19,8 @@ export function getPublicBaseUrl() {
 export function buildPublicUrl(path: string) {
   const normalizedPath = path.startsWith("/") ? path : `/${path}`;
   return `${getPublicBaseUrl()}${normalizedPath}`;
+}
+
+export function buildShortAuditUrl(lead: { id: string; shortSlug?: string | null }) {
+  return buildPublicUrl(buildPreferredAuditPath({ leadId: lead.id, shortSlug: lead.shortSlug }));
 }

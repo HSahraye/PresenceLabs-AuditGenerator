@@ -7,7 +7,7 @@ import { useFormStatus } from "react-dom";
 import { ArrowUpRight, BarChart3, CheckCircle2, Copy, ExternalLink, Filter, Loader2, Mail, Phone, Radar, Search, Share2, Sparkles, Trash2, XCircle } from "lucide-react";
 import { createCaseStudyAction } from "@/app/actions/case-studies";
 import { startLeadSequenceAction } from "@/app/actions/automation";
-import { createLeadAction, deleteLeadAction, importLeadsCsvAction, logOutreachAction, regenerateLeadAction, updateLeadNotesAction, updateLeadOfferAction, updateLeadStatusAction } from "@/app/actions/leads";
+import { createLeadAction, deleteLeadAction, importLeadsCsvAction, logOutreachAction, regenerateLeadAction, updateLeadNotesAction, updateLeadOfferAction, updateLeadShortSlugAction, updateLeadStatusAction } from "@/app/actions/leads";
 import { AuditGenBrandLockup } from "@/components/brand/auditgen-brand-lockup";
 import { WorkspaceSwitcher } from "@/components/workspace-switcher";
 import { sanitizePublicBrandCopy } from "@/lib/branding";
@@ -35,6 +35,7 @@ type LeadRow = {
   notes: string | null;
   status: string;
   score: number;
+  shortSlug: string | null;
   publicAuditPath: string;
   packageName: string;
   customPrice: number | null;
@@ -81,6 +82,7 @@ type CreateLeadState = { ok: boolean; error: string };
 const initialState: CreateLeadState = { ok: false, error: "" };
 const importInitialState = { ok: false as const, imported: 0, skipped: 0, failed: 0, duplicateCount: 0, invalidCount: 0, limitSkipped: 0, queued: false, jobId: "", error: "" };
 const offerInitialState = { ok: false as const, error: "", leadId: "" };
+const shortSlugInitialState = { ok: false as const, error: "", leadId: "" };
 const caseStudyInitialState = { ok: false as const, error: "" };
 const statuses: LeadStatus[] = ["New", "Contacted", "Follow-up", "Won", "Lost"];
 const standardPackages = ["Presence Labs Launch Package", "Presence Labs Conversion Upgrade", "Presence Labs Local Trust Tune-Up"];
@@ -290,6 +292,7 @@ export function AuditDashboard({
   const router = useRouter();
   const [importState, importFormAction] = useActionState(importLeadsCsvAction, importInitialState);
   const [offerState, offerFormAction] = useActionState(updateLeadOfferAction, offerInitialState);
+  const [shortSlugState, shortSlugFormAction] = useActionState(updateLeadShortSlugAction, shortSlugInitialState);
   const [caseStudyState, caseStudyFormAction] = useActionState(createCaseStudyAction, caseStudyInitialState);
   const [isDeleting, startDeleteTransition] = useTransition();
   const [isUpdatingStatus, startStatusTransition] = useTransition();
@@ -544,7 +547,7 @@ export function AuditDashboard({
   const copyAuditUrl = async (lead: LeadView) => {
     await navigator.clipboard.writeText(auditUrl(lead));
     setCopiedLeadId(lead.id);
-    void logOutreachAction(lead.id, "Share", "Copied public audit link");
+    void logOutreachAction(lead.id, "Share", "Copied short audit link");
     window.setTimeout(() => setCopiedLeadId((current) => (current === lead.id ? "" : current)), 1800);
   };
 
@@ -1223,7 +1226,7 @@ export function AuditDashboard({
                       📋 Prep
                     </Link>
                     <button type="button" onClick={(event) => { event.stopPropagation(); void copyAuditUrl(lead); }} className="inline-flex items-center gap-1 rounded-xl border border-slate-200 bg-white px-3 py-2 text-xs font-black text-slate-700 transition hover:bg-slate-50">
-                      <Share2 className="size-4" /> {copiedLeadId === lead.id ? "Copied!" : "Share audit"}
+                      <Share2 className="size-4" /> {copiedLeadId === lead.id ? "Short link copied!" : "Copy short link"}
                     </button>
                     {activeSequences.length ? (
                       <button
@@ -1271,6 +1274,21 @@ export function AuditDashboard({
                     <p className="text-xs font-black uppercase tracking-[0.18em] opacity-70">Lead score</p>
                   </div>
                 </div>
+                <form key={`short-slug-${selected.id}`} action={shortSlugFormAction} className="mt-4 grid gap-2 sm:grid-cols-[1fr_auto]">
+                  <input type="hidden" name="id" value={selected.id} />
+                  <label className="grid gap-1 text-xs font-black uppercase tracking-[0.14em] text-slate-500">
+                    Short audit link slug
+                    <input
+                      name="shortSlug"
+                      defaultValue={selected.shortSlug || ""}
+                      placeholder="bay-detail"
+                      className="h-10 rounded-xl border border-slate-200 px-3 text-sm font-bold lowercase outline-none focus:border-lime-400"
+                    />
+                  </label>
+                  <button className="h-10 rounded-xl bg-slate-950 px-4 text-xs font-black text-white transition hover:bg-slate-800">Save slug</button>
+                  {shortSlugState.ok && shortSlugState.leadId === selected.id ? <p className="rounded-xl bg-lime-50 p-2 text-xs font-black text-lime-800">Short slug saved.</p> : null}
+                  {!shortSlugState.ok && shortSlugState.error && shortSlugState.leadId === selected.id ? <p className="rounded-xl bg-rose-50 p-2 text-xs font-black text-rose-700">{shortSlugState.error}</p> : null}
+                </form>
               </div>
 
               <form key={`offer-${selected.id}`} action={offerFormAction} className="rounded-[2rem] border border-slate-200 bg-white p-5 shadow-sm">

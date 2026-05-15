@@ -13,7 +13,7 @@ import { buildProposalIntelligence } from "@/lib/intelligence/proposals/engine";
 import { getLeadIntelligence, getPrimaryPainPoints, getRecommendedOffer } from "@/lib/intelligence/selectors";
 import { resolveTemplate } from "@/lib/templates";
 import { requireRole } from "@/lib/auth";
-import { buildSignedAuditPath } from "@/lib/audit-links";
+import { buildPreferredAuditPath } from "@/lib/audit-links";
 import { getWorkspaceContext, withWorkspaceFallbackScope } from "@/lib/workspace";
 
 export const dynamic = "force-dynamic";
@@ -97,7 +97,7 @@ export default async function MeetingPrepPage({ params }: { params: Promise<{ id
       sectionOrder: offerTemplate.config.sectionOrder,
     },
   });
-  const auditPath = buildSignedAuditPath(lead.id);
+  const auditPath = buildPreferredAuditPath({ leadId: lead.id, shortSlug: lead.shortSlug });
   const availableSequences = await prisma.sequence.findMany({
     where: { workspaceId, status: "active" },
     select: { id: true, name: true },

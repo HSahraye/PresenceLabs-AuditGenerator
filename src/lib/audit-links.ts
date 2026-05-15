@@ -48,3 +48,12 @@ export function buildSignedAuditPath(leadId: string) {
   const token = createAuditAccessToken(leadId);
   return `/audit/${leadId}?token=${encodeURIComponent(token)}`;
 }
+
+export function buildShortAuditPath(shortSlug: string) {
+  return `/a/${encodeURIComponent(shortSlug)}`;
+}
+
+export function buildPreferredAuditPath(input: { leadId: string; shortSlug?: string | null }) {
+  if (input.shortSlug) return buildShortAuditPath(input.shortSlug);
+  return buildSignedAuditPath(input.leadId);
+}

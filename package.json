@@ -13,6 +13,7 @@
     "db:push": "prisma db push",
     "db:migrate:deploy": "prisma migrate deploy",
     "db:backfill:workspace": "tsx scripts/backfill-default-workspace.ts",
+    "backfill:audit-slugs": "tsx scripts/backfill-audit-slugs.ts",
     "db:bootstrap:saas": "tsx scripts/bootstrap-saas.ts",
     "db:bootstrap:automation": "tsx scripts/bootstrap-automation.ts",
     "db:studio": "prisma studio",

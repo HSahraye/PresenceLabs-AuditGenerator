@@ -7,6 +7,7 @@ import { logger } from "./logger";
 import { trackEvent } from "./events";
 import { markOnboardingMilestone } from "@/lib/onboarding";
 import { getWorkspaceContext, withWorkspaceFallbackScope } from "./workspace";
+import { generateUniqueAuditSlug } from "@/lib/audit-slugs";
 
 const DEFAULT_CHUNK_SIZE = 3;
 const RETRYABLE_IMPORT_ERRORS = [/429/, /rate limit/i, /timeout/i, /network/i, /5\d\d/];
@@ -97,9 +98,11 @@ async function processRow(row: CsvRow, index: number, workspaceId: string) {
     notes,
     workspaceId,
   });
+  const shortSlug = await generateUniqueAuditSlug(businessName || websiteUrl);
   await prisma.lead.create({
     data: {
       workspaceId,
+      shortSlug,
       businessName: businessName || websiteUrl,
       ownerName: ownerName || null,
       category: category || null,

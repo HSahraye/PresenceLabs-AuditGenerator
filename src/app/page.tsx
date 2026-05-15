@@ -1,6 +1,6 @@
 import { AuditDashboard } from "@/components/audit-dashboard";
 import { listCurrentUserWorkspaces, requireSessionRole } from "@/lib/auth";
-import { buildSignedAuditPath } from "@/lib/audit-links";
+import { buildPreferredAuditPath } from "@/lib/audit-links";
 import { resolvePublicSenderName } from "@/lib/branding";
 import { prisma } from "@/lib/prisma";
 import { getPublicBaseUrl } from "@/lib/url";
@@ -166,7 +166,8 @@ export default async function Home() {
         notes: lead.notes,
         status: lead.status,
         score: lead.score,
-        publicAuditPath: buildSignedAuditPath(lead.id),
+        shortSlug: lead.shortSlug,
+        publicAuditPath: buildPreferredAuditPath({ leadId: lead.id, shortSlug: lead.shortSlug }),
         packageName: lead.packageName,
         customPrice: lead.customPrice,
         stripePaymentUrl: lead.stripePaymentUrl,

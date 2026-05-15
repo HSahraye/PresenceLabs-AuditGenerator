@@ -258,6 +258,7 @@ model Verification {
 model Lead {
   id                  String      @id @default(cuid())
   workspaceId         String?
+  shortSlug           String?     @unique
   businessName        String
   ownerName           String?
   category            String?
@@ -301,6 +302,7 @@ model Lead {
   @@index([workspaceId, createdAt])
   @@index([workspaceId, status])
   @@index([workspaceId, score])
+  @@index([shortSlug])
 }
 
 model OutreachLog {

@@ -21,6 +21,7 @@ import { trackSalesOsEvent } from "@/lib/analytics/events";
 import { writeAuditLog } from "@/lib/audit-log";
 import { trackEvent } from "@/lib/events";
 import { sendCrmWebhook } from "@/lib/crm";
+import { generateUniqueAuditSlug, normalizeAuditSlug } from "@/lib/audit-slugs";
 import { getWorkspaceContext, withWorkspaceFallbackScope } from "@/lib/workspace";
 
 const leadStatuses = ["New", "Contacted", "Follow-up", "Won", "Lost"] as const;
@@ -63,6 +64,15 @@ const outreachSchema = z.object({
   nextFollowUpAt: z.string().optional(),
 });
 
+const shortSlugSchema = z.object({
+  id: z.string().min(1),
+  shortSlug: z
+    .string()
+    .min(1, "Short slug is required.")
+    .max(32)
+    .regex(/^[a-z0-9-]+$/, "Short slug can include lowercase letters, numbers, and hyphens only."),
+});
+
 function normalizeWebsiteKey(value?: string) {
   if (!value) return "";
   return value
@@ -98,11 +108,13 @@ export async function createLeadAction(_prevState: unknown, formData: FormData) 
     }
 
     const audit = await generateAudit({ ...parsed.data, workspaceId });
+    const shortSlug = await generateUniqueAuditSlug(parsed.data.businessName);
 
     const lead = await prisma.lead.create({
       data: {
         ...parsed.data,
         workspaceId,
+        shortSlug,
         ownerName: parsed.data.ownerName || null,
         websiteUrl: parsed.data.websiteUrl || null,
         googleProfileUrl: parsed.data.googleProfileUrl || null,
@@ -498,9 +510,11 @@ export async function importLeadsCsvAction(_prevState: unknown, formData: FormDa
 
     try {
       const audit = await generateAudit({ businessName: businessName || websiteUrl, ownerName, category, location, websiteUrl, notes, workspaceId });
+      const shortSlug = await generateUniqueAuditSlug(businessName || websiteUrl);
       await prisma.lead.create({
         data: {
           workspaceId,
+          shortSlug,
           businessName: businessName || websiteUrl,
           ownerName: ownerName || null,
           category: category || null,
@@ -564,4 +578,44 @@ export async function deleteLeadAction(id: string) {
   revalidatePath("/");
   await writeAuditLog({ action: "lead.delete", actorRole, leadId: parsed.data, workspaceId });
   return { ok: true };
+}
+
+export async function updateLeadShortSlugAction(_prevState: unknown, formData: FormData) {
+  const actorRole = await requireRole(["admin", "sales"]);
+  const { workspaceId } = await getWorkspaceContext();
+  const parsed = shortSlugSchema.safeParse({
+    id: formData.get("id"),
+    shortSlug: normalizeAuditSlug(String(formData.get("shortSlug") ?? "")),
+  });
+
+  if (!parsed.success) {
+    return { ok: false, error: parsed.error.issues[0]?.message || "Invalid short slug.", leadId: "" };
+  }
+
+  try {
+    await prisma.lead.updateMany({
+      where: {
+        id: parsed.data.id,
+        ...withWorkspaceFallbackScope(workspaceId),
+      },
+      data: { shortSlug: parsed.data.shortSlug },
+    });
+  } catch (error) {
+    const message = error instanceof Error ? error.message : "Could not update short slug.";
+    if (message.toLowerCase().includes("unique")) {
+      return { ok: false, error: "This short slug is already in use.", leadId: parsed.data.id };
+    }
+    return { ok: false, error: message, leadId: parsed.data.id };
+  }
+
+  revalidatePath("/");
+  revalidatePath(`/prep/${parsed.data.id}`);
+  await writeAuditLog({
+    action: "lead.short_slug.update",
+    actorRole,
+    leadId: parsed.data.id,
+    metadata: { shortSlug: parsed.data.shortSlug },
+    workspaceId,
+  });
+  return { ok: true, error: "", leadId: parsed.data.id };
 }

@@ -12,6 +12,7 @@ import { prisma } from "@/lib/prisma";
 import { requireRole } from "@/lib/auth";
 import { writeAuditLog } from "@/lib/audit-log";
 import { trackEvent } from "@/lib/events";
+import { generateUniqueAuditSlug } from "@/lib/audit-slugs";
 import { getWorkspaceContext, withWorkspaceFallbackScope } from "@/lib/workspace";
 
 const queueStatuses = ["Queued", "Researching", "Audited", "Converted", "Skipped"] as const;
@@ -171,10 +172,12 @@ export async function convertQueueItemToLeadAction(id: string) {
     notes: item.notes ?? undefined,
     workspaceId,
   });
+  const shortSlug = await generateUniqueAuditSlug(item.businessName);
 
   const lead = await prisma.lead.create({
     data: {
       workspaceId,
+      shortSlug,
       businessName: item.businessName,
       category: item.category,
       location: item.location,

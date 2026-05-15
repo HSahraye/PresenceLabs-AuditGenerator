@@ -1,7 +1,7 @@
 import { prisma } from "@/lib/prisma";
 import { CallTodayDashboard } from "@/components/call-today-dashboard";
 import { requireRole } from "@/lib/auth";
-import { buildSignedAuditPath } from "@/lib/audit-links";
+import { buildPreferredAuditPath } from "@/lib/audit-links";
 import { getWorkspaceContext, withWorkspaceFallbackScope } from "@/lib/workspace";
 
 export const dynamic = "force-dynamic";
@@ -49,6 +49,7 @@ export default async function CallTodayPage() {
       notes: true,
       status: true,
       score: true,
+      shortSlug: true,
       packageName: true,
       customPrice: true,
       painSummary: true,
@@ -61,7 +62,7 @@ export default async function CallTodayPage() {
 
   const serialized = leads.map((l) => ({
     ...l,
-    publicAuditPath: buildSignedAuditPath(l.id),
+    publicAuditPath: buildPreferredAuditPath({ leadId: l.id, shortSlug: l.shortSlug }),
     intelligenceJson: l.intelligenceJson ?? null,
     nextFollowUpAt: l.nextFollowUpAt ? l.nextFollowUpAt.toISOString() : null,
     lastContactedAt: l.lastContactedAt ? l.lastContactedAt.toISOString() : null,
